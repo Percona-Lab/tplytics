@@ -49,10 +49,20 @@ class Engine:
     #: counter; the dashboard shows its rate as "DB transactions/s". None = not shown.
     activity_sql = None
 
+    #: same, for a cumulative counter of statements: shown as "queries/s". None = not shown.
+    queries_sql = None
+
     def activity_counter(self, session):
-        if not self.activity_sql:
+        return self._counter(session, self.activity_sql)
+
+    def queries_counter(self, session):
+        return self._counter(session, self.queries_sql)
+
+    @staticmethod
+    def _counter(session, sql):
+        if not sql:
             return None
-        _, rows = session.execute(self.activity_sql)
+        _, rows = session.execute(sql)
         return sum(float(r[-1] or 0) for r in rows)
 
     # -- heartbeat ---------------------------------------------------------
@@ -174,6 +184,7 @@ class MySQLEngine(Engine):
         return args
 
     activity_sql = "SHOW GLOBAL STATUS WHERE Variable_name IN ('Com_commit', 'Com_rollback')"
+    queries_sql = "SHOW GLOBAL STATUS WHERE Variable_name = 'Queries'"
     heartbeat_ts_type = "DATETIME"   # TIMESTAMP would follow the session time zone
 
     def timeout_statement(self, seconds):
@@ -263,6 +274,7 @@ class DBTrailEngine(MySQLEngine):
     dialects = ["dbtrail", "duckdb", "mysql", "default"]
     default_port = 3309
     activity_sql = None   # the copy has no transaction counters
+    queries_sql = None
     heartbeat_writable = False
 
     def connect(self):

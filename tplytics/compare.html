@@ -50,7 +50,8 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .good { color: var(--good); } .warn { color: var(--warning); } .crit { color: var(--critical); } .dim { color: var(--muted); }
 
 /* ---- top strip: primary + comparison ---- */
-.primary-card { padding: 0.6rem 0.8rem; display: grid; grid-template-columns: 12rem repeat(3, minmax(0, 1fr)); gap: 0.8rem; align-items: stretch; }
+.primary-card { padding: 0.6rem 0.8rem; display: grid; grid-template-columns: 10rem repeat(4, minmax(0, 1fr)); gap: 0.8rem; align-items: stretch; }
+.primary-card .spark { height: 2.4rem; }
 .primary-card .who .name { font-size: 1.1rem; font-weight: 700; margin-top: 0.2rem; line-height: 1.25; }
 .primary-card .who .sub { color: var(--text-secondary); font-size: 0.9rem; }
 .verdict { padding: 0.9rem 1.1rem; display: flex; flex-direction: column; justify-content: center; }
@@ -152,11 +153,11 @@ tr.fresh { animation: slidein .6s ease-out; }
 
   <div class="board">
     <div class="main">
-      <div class="card primary-card" id="primary"></div>
       <div class="cols" id="cols"></div>
       <div class="card round" id="round"><div class="empty">Waiting for the first query…</div></div>
       <div class="cols" id="results"></div>
       <div class="card"><h2 id="recentTitle">Recent rounds</h2><div id="recent"></div></div>
+      <div class="card primary-card" id="primary"></div>
     </div>
     <div class="side">
       <div class="card verdict" id="verdict"></div>
@@ -217,7 +218,8 @@ const LOADS = [
    head: p => (p.read_mb || 0) + (p.write_mb || 0), sub: p => `read ${fmtN(p.read_mb, 1)} · write ${fmtN(p.write_mb, 1)}`},
   {key: "iops", label: "Disk IOPS", unit: "", dec: 0, series: c => [{f: "iops", c}], head: p => p.iops, sub: () => "reads + writes"},
 ];
-const TPS = {key: "tps", label: "Primary tx/s", unit: "", dec: 0, series: c => [{f: "tps", c}], head: p => p.tps, sub: () => "commits + rollbacks (HammerDB)"};
+const TPS = {key: "tps", label: "MySQL tx/s", unit: "", dec: 0, series: c => [{f: "tps", c}], head: p => p.tps, sub: () => "commits + rollbacks"};
+const QPS = {key: "qps", label: "MySQL QPS", unit: "", dec: 0, series: c => [{f: "qps", c}], head: p => p.qps, sub: () => "statements/s, all sessions"};
 function loadTile(id, def) {
   return `<div class="card load" id="${id}"><div class="row"><span class="k">${def.label}</span>
 </div>
@@ -251,7 +253,7 @@ function build() {
     </div>`).join("");
   document.getElementById("primary").innerHTML = `<div class="who"><div class="k">Primary · HammerDB</div>
       <div class="name" id="pname"></div><div class="sub" id="psub"></div></div>
-    ${loadTile("p-cpu", LOADS[0])}${loadTile("p-disk", LOADS[1])}${loadTile("p-tps", TPS)}`;
+    ${loadTile("p-cpu", LOADS[0])}${loadTile("p-disk", LOADS[1])}${loadTile("p-qps", QPS)}${loadTile("p-tps", TPS)}`;
   built = n;
 }
 
@@ -272,6 +274,7 @@ function render() {
   document.getElementById("psub").textContent = `${L.host} · ${L.cpus} CPUs`;
   drawLoad("p-cpu", LOADS[0], L.series, L.system_stats, "var(--accent)", "not available");
   drawLoad("p-disk", LOADS[1], L.series, L.system_stats, "var(--accent)", "not available");
+  drawLoad("p-qps", QPS, L.series, L.qps_stats, "var(--accent)", "no [primary] in the config");
   drawLoad("p-tps", TPS, L.series, L.db_stats, "var(--accent)", "no [primary] in the config");
 
   /* verdict */

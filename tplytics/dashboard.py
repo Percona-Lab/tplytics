@@ -69,6 +69,7 @@ class Sampler(threading.Thread):
         self.series = collections.deque(maxlen=SERIES_POINTS)
         self.lock = threading.Lock()
         self.db_enabled = engine is not None and engine.activity_sql is not None
+        self.qps_enabled = engine is not None and engine.queries_sql is not None
 
     def run(self):
         session = None
@@ -87,6 +88,8 @@ class Sampler(threading.Thread):
                     if session is None:
                         session = self.engine.connect()
                     cur["tx"] = self.engine.activity_counter(session)
+                    if self.qps_enabled:
+                        cur["q"] = self.engine.queries_counter(session)
                 except Exception:  # noqa: BLE001 - counters are best effort
                     if session is not None:
                         session.close()
@@ -111,6 +114,8 @@ class Sampler(threading.Thread):
             pt["iops"] = round((d["read_ios"] + d["write_ios"]) / dt, 0)
         if a.get("tx") is not None and b.get("tx") is not None:
             pt["tps"] = round(max(0.0, b["tx"] - a["tx"]) / dt, 1)
+        if a.get("q") is not None and b.get("q") is not None:
+            pt["qps"] = round(max(0.0, b["q"] - a["q"]) / dt, 1)
         with self.lock:
             self.series.append(pt)
 
