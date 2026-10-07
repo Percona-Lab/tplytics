@@ -145,6 +145,13 @@ class MySQLEngine(Engine):
             args["read_default_file"] = o.defaults_file
         if o.socket:
             args["unix_socket"] = o.socket
+        elif o.defaults_file:
+            # PyMySQL prefers an explicit argument over the option file, so
+            # pass the host only when given on the command line, and the
+            # port from the command line, else the file, else the engine's.
+            if o.host:
+                args["host"] = o.host
+            args["port"] = int(o.port or _cnf_port(o.defaults_file) or self.default_port)
         else:
             args["host"] = o.host or "127.0.0.1"
             args["port"] = int(o.port or self.default_port)
@@ -170,7 +177,13 @@ class MySQLSession(Session):
         import pymysql
         self.conn = pymysql.connect(**self.engine.connect_args())
         with self.conn.cursor() as c:
-            c.execute("SELECT CONNECTION_ID(), VERSION()")
+            try:
+                c.execute("SELECT CONNECTION_ID(), VERSION()")
+            except pymysql.err.OperationalError as e:
+                if "connection_id does not exist" in str(e):   # DuckDB behind the MySQL protocol
+                    raise RuntimeError("this server runs DuckDB SQL behind the MySQL protocol "
+                                       "(a DBTrail port?): use --engine dbtrail") from None
+                raise
             self.conn_id, self.server_version = c.fetchone()
 
     def set_timeout(self, seconds):
@@ -211,6 +224,57 @@ class MariaDBEngine(MySQLEngine):
 
     def timeout_statement(self, seconds):
         return "SET SESSION max_statement_time = %g" % seconds
+
+
+def _cnf_port(path, group="client"):
+    """The port in a MySQL option file's [client] group, as PyMySQL reads it."""
+    import configparser
+    cfg = configparser.RawConfigParser(allow_no_value=True, strict=False)
+    try:
+        cfg.read(path)
+        v = cfg.get(group, "port")
+        return int(v.strip("'\"")) if v else None
+    except (configparser.Error, ValueError):
+        return None
+
+
+# ================================================================ DBTrail
+class DBTrailEngine(MySQLEngine):
+    """The MySQL port of a DBTrail daemon: SQL on its Parquet copy.
+
+    The port speaks the MySQL protocol, but the statement runs in DuckDB, so
+    the dialect chain tries ``[sql].duckdb`` before the MySQL text. The port
+    has no CONNECTION_ID(), max_execution_time or KILL QUERY: it stops a
+    statement at its own cap (60 s by default, MySQL error 1317), and a
+    client that disconnects ends its statement, which is how cancel works.
+    """
+    name = "dbtrail"
+    dialects = ["dbtrail", "duckdb", "mysql", "default"]
+    default_port = 3309
+    activity_sql = None   # the copy has no transaction counters
+
+    def connect(self):
+        s = DBTrailSession(self)
+        s.open()
+        return s
+
+
+class DBTrailSession(MySQLSession):
+    def open(self):
+        import pymysql
+        self.conn = pymysql.connect(**self.engine.connect_args())
+        self.conn_id = None
+        # SELECT VERSION() returns no row on the port: use the handshake.
+        self.server_version = "DBTrail (MySQL protocol %s)" % self.conn.get_server_info()
+
+    def set_timeout(self, seconds):
+        Session.set_timeout(self, seconds)   # the port enforces its own cap
+
+    def cancel(self):
+        import socket
+        sock = getattr(self.conn, "_sock", None)
+        if sock is not None:
+            sock.shutdown(socket.SHUT_RDWR)
 
 
 # ============================================================ PostgreSQL
@@ -278,9 +342,10 @@ ENGINES = {
     "mysql": MySQLEngine,
     "mariadb": MariaDBEngine,
     "postgresql": PostgreSQLEngine,
+    "dbtrail": DBTrailEngine,
 }
 ALIASES = {"percona": "mysql", "ps": "mysql", "postgres": "postgresql", "pg": "postgresql",
-           "pgsql": "postgresql"}
+           "pgsql": "postgresql", "bintrail": "dbtrail"}
 
 
 def get_engine(name, opts):

@@ -28,6 +28,18 @@ WHERE  h_date >= {win_start} AND h_date < {win_end}
 GROUP  BY 1
 ORDER  BY 1
 """
+duckdb = """
+SELECT time_bucket(to_seconds({win_bucket}), h_date, TIMESTAMP '1970-01-01') AS period_start,
+       COUNT(*)                                                    AS payments,
+       SUM(h_amount)                                               AS amount,
+       ROUND(AVG(h_amount), 2)                                     AS avg_payment,
+       MAX(h_amount)                                               AS max_payment,
+       SUM(CASE WHEN h_c_w_id <> h_w_id THEN 1 ELSE 0 END)         AS remote_payments
+FROM   history
+WHERE  h_date >= {win_start} AND h_date < {win_end}
+GROUP  BY 1
+ORDER  BY 1
+"""
 postgresql = """
 SELECT to_timestamp(FLOOR(EXTRACT(EPOCH FROM h_date) / {win_bucket}) * {win_bucket}) AS period_start,
        COUNT(*)                                                    AS payments,

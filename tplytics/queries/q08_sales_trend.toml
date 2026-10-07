@@ -31,6 +31,21 @@ WHERE  o.o_w_id BETWEEN {wh_lo} AND {wh_hi}
 GROUP  BY 1
 ORDER  BY 1
 """
+duckdb = """
+SELECT time_bucket(to_seconds({win_bucket}), o.o_entry_d, TIMESTAMP '1970-01-01') AS period_start,
+       SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END)            AS orders,
+       COUNT(*)                                                     AS order_lines,
+       SUM(ol.ol_amount)                                            AS revenue,
+       ROUND(1.0 * COUNT(*) / NULLIF(SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END), 0), 2) AS lines_per_order,
+       ROUND(SUM(ol.ol_amount) / NULLIF(SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END), 0), 2) AS avg_order_value,
+       ROUND(100.0 * SUM(CASE WHEN ol.ol_supply_w_id <> ol.ol_w_id THEN 1 ELSE 0 END) / COUNT(*), 3) AS pct_remote_lines
+FROM   orders o
+JOIN   order_line ol ON ol.ol_w_id = o.o_w_id AND ol.ol_d_id = o.o_d_id AND ol.ol_o_id = o.o_id
+WHERE  o.o_w_id BETWEEN {wh_lo} AND {wh_hi}
+  AND  o.o_entry_d >= {win_start} AND o.o_entry_d < {win_end}
+GROUP  BY 1
+ORDER  BY 1
+"""
 postgresql = """
 SELECT to_timestamp(FLOOR(EXTRACT(EPOCH FROM o.o_entry_d) / {win_bucket}) * {win_bucket}) AS period_start,
        SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END)            AS orders,

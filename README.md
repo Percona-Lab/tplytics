@@ -22,8 +22,10 @@ writing to, and how much each workload slows the other down.
 * Three modes: **demo**, **serial** and **concurrent**, plus a live **dashboard**
   that runs the queries in a loop in the browser.
 
-Supported engines: MySQL / Percona Server (`mysql`), MariaDB (`mariadb`) and
-PostgreSQL (`postgresql`). Other engines can be added easily (see
+Supported engines: MySQL / Percona Server (`mysql`), MariaDB (`mariadb`),
+PostgreSQL (`postgresql`) and the MySQL port of [DBTrail](https://github.com/dbtrail/dbtrail)
+(`dbtrail`), which runs the queries in DuckDB on DBTrail's Parquet copy (see
+[DBTrail](#dbtrail)). Other engines can be added easily (see
 [Adding an engine](#adding-an-engine)).
 
 ## Quick start
@@ -44,8 +46,9 @@ pip install -r requirements.txt      # PyMySQL, psycopg 3 (Python 3.8+; tomli on
 On Ubuntu/Debian the drivers are also packaged: `apt install python3-pymysql python3-psycopg`.
 
 Connection defaults follow HammerDB: database `tpcc`, user `root` for MySQL and
-`tpcc` for PostgreSQL. `--defaults-file ~/.my.cnf` reads MySQL credentials from
-an option file. `--socket` connects through a Unix socket (for PostgreSQL, give
+`tpcc` for PostgreSQL. `--defaults-file ~/.my.cnf` reads MySQL credentials, and
+the host and port, from the `[client]` group of an option file; `--host` and
+`--port` on the command line take precedence. `--socket` connects through a Unix socket (for PostgreSQL, give
 the socket directory). Any connection option can also be set as an environment
 variable: `TPLYTICS_ENGINE`, `TPLYTICS_HOST`, `TPLYTICS_PORT`, `TPLYTICS_USER`,
 `TPLYTICS_PASSWORD`, `TPLYTICS_DATABASE` or `TPLYTICS_SOCKET`.
@@ -258,15 +261,44 @@ benchmark run. HammerDB's MySQL stored procedures do not maintain
 `history` instead. On a freshly loaded database that HammerDB has not run
 against yet, some queries legitimately return no rows.
 
+## DBTrail
+
+[DBTrail](https://github.com/dbtrail/dbtrail) keeps a Parquet copy of a MySQL
+server, fed from its binlog, and its daemon can serve that copy on a MySQL
+protocol port (turn it on in the web interface under **Connect a SQL client**;
+the Docker Compose stack publishes it on `127.0.0.1:3309`). Statements on that
+port run in DuckDB, so `--engine dbtrail` tries `[sql].dbtrail`, then
+`[sql].duckdb`, then the MySQL text. Q05, Q08 and Q10 have DuckDB variants
+(`time_bucket` instead of `FROM_UNIXTIME(UNIX_TIMESTAMP())`, `date_diff`
+instead of `TIMESTAMPDIFF`); the other queries run unchanged.
+
+```bash
+# user = the server's id in DBTrail, password = the port's password
+./tplytics.py serial --engine dbtrail --host 127.0.0.1 --port 3309 \
+              -u '<server id>' -p '<port password>' --timeout 60
+```
+
+What differs from a MySQL server:
+
+* The copy is as fresh as DBTrail's last snapshot or scheduled refresh, so
+  `info` shows where its data ends, and the time windows end there.
+* The port runs one statement at a time per server, stops a statement after
+  60 s (reported as a timeout) and refuses results over 1,000 rows (error
+  1104). Concurrent mode therefore measures the queue in front of DuckDB.
+* It has no `CONNECTION_ID()`, `max_execution_time` or `KILL QUERY`. The
+  watchdog cancels a statement by closing the connection, which DBTrail
+  treats as a cancel, and opens a new one.
+
 ## Timeouts and errors
 
 `--timeout` (300 s by default) is enforced twice:
 
 1. The server is asked to stop the statement: `max_execution_time` on MySQL,
    `max_statement_time` on MariaDB and `statement_timeout` on PostgreSQL.
+   DBTrail has its own fixed cap instead.
 2. A client-side watchdog cancels the statement 2 s later if it is still
    running (`KILL QUERY <id>` on a separate connection for MySQL, a cancel
-   request for PostgreSQL). This also covers engines or statements the server
+   request for PostgreSQL, closing the connection for DBTrail). This also covers engines or statements the server
    timeout does not apply to.
 
 Such an execution is reported as **timeout**. Any other database error is

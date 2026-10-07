@@ -12,6 +12,11 @@ from tplytics import params as P  # noqa: E402
 from tplytics import queries as Q  # noqa: E402
 from tplytics.engines import ENGINES  # noqa: E402
 
+try:
+    import pymysql  # noqa: F401
+except ImportError:
+    pymysql = None
+
 
 def fake_state(warehouses=40, span_s=3600):
     t_max = dt.datetime(2026, 10, 7, 12, 0, 0)
@@ -67,6 +72,39 @@ class OfflineTests(unittest.TestCase):
         e = self.engines[0]
         q.unsupported = [e.name]
         self.assertFalse(q.supported(e))
+
+    def test_dbtrail_uses_duckdb_text(self):
+        e = ENGINES["dbtrail"](types.SimpleNamespace(schema=None))
+        by_id = {q.id: q for q in self.queries}
+        rng = random.Random(1)
+        for qid, fn in (("Q05", "time_bucket"), ("Q08", "time_bucket"), ("Q10", "date_diff")):
+            sql = by_id[qid].render(e, by_id[qid].new_params(fake_state(), rng))
+            self.assertIn(fn, sql, qid)
+            self.assertNotIn("UNIX_TIMESTAMP", sql, qid)
+            self.assertNotIn("TIMESTAMPDIFF", sql, qid)
+
+    @unittest.skipIf(pymysql is None, "PyMySQL is not installed")
+    def test_defaults_file_port(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".cnf", delete=False) as f:
+            f.write("[client]\nhost=10.0.0.5\nport=3309\nuser=u\n")
+        try:
+            def args(engine, **kw):
+                o = dict(defaults_file=f.name, socket=None, host=None, port=None, user=None,
+                         password=None, database="tpcc")
+                o.update(kw)
+                return ENGINES[engine](types.SimpleNamespace(**o)).connect_args()
+            a = args("mysql")
+            self.assertEqual(a["port"], 3309)
+            self.assertNotIn("host", a)              # PyMySQL reads it from the file
+            self.assertEqual(args("mysql", port="3400")["port"], 3400)
+            self.assertEqual(args("mysql", host="db1")["host"], "db1")
+            with open(f.name, "w") as g:
+                g.write("[client]\nuser=u\n")
+            self.assertEqual(args("mysql")["port"], 3306)
+            self.assertEqual(args("dbtrail")["port"], 3309)
+        finally:
+            os.unlink(f.name)
 
 
 if __name__ == "__main__":

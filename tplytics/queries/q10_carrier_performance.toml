@@ -31,6 +31,22 @@ WHERE  o.o_w_id BETWEEN {wh_lo} AND {wh_hi}
 GROUP  BY o.o_carrier_id
 ORDER  BY o.o_carrier_id
 """
+duckdb = """
+SELECT o.o_carrier_id                                                       AS carrier,
+       SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END)                    AS delivered_orders,
+       COUNT(*)                                                             AS delivered_lines,
+       SUM(ol.ol_amount)                                                    AS delivered_value,
+       ROUND(AVG(date_diff('second', o.o_entry_d, ol.ol_delivery_d)), 1)    AS avg_delay_s,
+       MAX(date_diff('second', o.o_entry_d, ol.ol_delivery_d))              AS max_delay_s,
+       ROUND(100.0 * SUM(CASE WHEN o.o_all_local = 0 THEN 1 ELSE 0 END) / COUNT(*), 2) AS pct_lines_in_remote_orders
+FROM   orders o
+JOIN   order_line ol ON ol.ol_w_id = o.o_w_id AND ol.ol_d_id = o.o_d_id AND ol.ol_o_id = o.o_id
+WHERE  o.o_w_id BETWEEN {wh_lo} AND {wh_hi}
+  AND  o.o_entry_d >= {win_start} AND o.o_entry_d < {win_end}
+  AND  o.o_carrier_id IS NOT NULL
+GROUP  BY o.o_carrier_id
+ORDER  BY o.o_carrier_id
+"""
 postgresql = """
 SELECT o.o_carrier_id                                                       AS carrier,
        SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END)                    AS delivered_orders,
