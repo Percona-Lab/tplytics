@@ -9,7 +9,7 @@
   color-scheme: dark;
   --bg: #0f0f0e; --surface-1: #191918; --surface-2: #212120; --text-primary: #ffffff; --text-secondary: #c3c2b7;
   --muted: #8d8c85; --line: #2c2c2a; --grid: #2a2a28; --code: #141413;
-  --t0: #3987e5; --t1: #e8743b; --t2: #3cb371; --t3: #b47ee5;
+  --t0: #3987e5; --t1: #e8743b; --t2: #3cb371; --t3: #b47ee5; --rd: #3987e5; --wr: #ef6a6a;
   --good: #3cb371; --warning: #e0a030; --critical: #ef6a6a; --accent: #3987e5;
 }
 @media (prefers-color-scheme: light) {
@@ -17,7 +17,7 @@
     color-scheme: light;
     --bg: #f2f3f5; --surface-1: #fcfcfb; --surface-2: #f5f5f2; --text-primary: #0b0b0b; --text-secondary: #52514e;
     --muted: #7a7974; --line: #e1e0dc; --grid: #ebeae6; --code: #f3f3f0;
-    --t0: #2a78d6; --t1: #d95f22; --t2: #1a8a4a; --t3: #8a52c7;
+    --t0: #2a78d6; --t1: #d95f22; --t2: #1a8a4a; --t3: #8a52c7; --rd: #2a78d6; --wr: #d03b3b;
     --good: #1a8a4a; --warning: #b77900; --critical: #d03b3b; --accent: #2a78d6;
   }
 }
@@ -25,12 +25,12 @@
   color-scheme: light;
   --bg: #f2f3f5; --surface-1: #fcfcfb; --surface-2: #f5f5f2; --text-primary: #0b0b0b; --text-secondary: #52514e;
   --muted: #7a7974; --line: #e1e0dc; --grid: #ebeae6; --code: #f3f3f0;
-  --t0: #2a78d6; --t1: #d95f22; --t2: #1a8a4a; --t3: #8a52c7;
+  --t0: #2a78d6; --t1: #d95f22; --t2: #1a8a4a; --t3: #8a52c7; --rd: #2a78d6; --wr: #d03b3b;
   --good: #1a8a4a; --warning: #b77900; --critical: #d03b3b; --accent: #2a78d6;
 }
 /* Sized for a big screen: everything scales with the viewport, so a 16:9
    screen (1080p up to 4K) shows the whole board without scrolling. */
-html { font-size: clamp(10px, min(0.74vw, 1.14vh), 32px); }
+html { font-size: clamp(7px, min(0.74vw, 1.12vh), 32px); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text-primary);
        font: 1rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -173,13 +173,20 @@ tr.errrow .who { font-weight: 700; font-size: 0.85rem; margin: 0.2rem 0; }
          font-size: 0.85rem; padding: 0.35rem 0.6rem; border-radius: 0.4rem; white-space: nowrap; display: none; z-index: 5;
          font-variant-numeric: tabular-nums; line-height: 1.45; }
 .ltempty { position: absolute; left: 0; right: 0; top: 55%; text-align: center; color: var(--muted); }
-@media (max-width: 1300px) {
+/* Stack only on small screens (phones, narrow windows); scaled big screens of
+   1000+ CSS pixels keep the board and just get smaller type. */
+@media (max-width: 900px) {
   html { font-size: 13px; }
-  .board, .primary-card { grid-template-columns: minmax(0, 1fr); }
+  .board { grid-template-columns: minmax(0, 1fr); }
+  .primary-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .primary-card .who { grid-row: auto; grid-column: 1 / -1; }
 }
-@media (max-width: 800px) {
-  .kpis, .loads, .cols { grid-template-columns: minmax(0, 1fr) !important; }
+@media (max-width: 640px) {
+  .kpis, .loads, .cols, .primary-card { grid-template-columns: minmax(0, 1fr) !important; }
 }
+.legend .rd, .legend .wr { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 2px; vertical-align: middle; margin: 0 0.2rem 0 0.4rem; }
+.legend .rd { background: var(--rd); opacity: .75; } .legend .wr { background: var(--wr); opacity: .75; }
+.spark path.stk { stroke: none; opacity: .55; }
 </style>
 </head>
 <body>
@@ -255,18 +262,41 @@ function spark(pts, series, max) {
   });
   return h;
 }
+function stackedSpark(pts, parts) {
+  const W = 300, H = 50;
+  pts = pts.filter(p => p[parts[0].f] !== undefined);
+  if (pts.length < 2) return "";
+  const tot = p => parts.reduce((a, s) => a + (p[s.f] || 0), 0);
+  const ymax = niceMax(Math.max(...pts.map(tot)) * 1.1);
+  const X = i => (i + (180 - pts.length)) / 179 * W, Y = v => H - 2 - Math.min(v, ymax) / ymax * (H - 4);
+  let h = `<line class="grid" x1="0" x2="${W}" y1="${H - 1}" y2="${H - 1}"/><line class="grid" x1="0" x2="${W}" y1="${Y(ymax / 2)}" y2="${Y(ymax / 2)}"/>`;
+  let below = pts.map(() => 0);
+  parts.forEach(s => {
+    const above = pts.map((p, i) => below[i] + (p[s.f] || 0));
+    const top = above.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+    const back = below.map((v, i) => `L${X(i).toFixed(1)},${Y(v).toFixed(1)}`).reverse().join("");
+    h += `<path class="stk" style="fill:${s.c}" d="${top}${back}Z"/><path class="line" style="stroke:${s.c}" d="${top}"/>`;
+    below = above;
+  });
+  return h;
+}
+const RW_MB = [{f: "read_mb", c: "var(--rd)"}, {f: "write_mb", c: "var(--wr)"}];
+const RW_IOPS = [{f: "read_iops", c: "var(--rd)"}, {f: "write_iops", c: "var(--wr)"}];
 const LOADS = [
   {key: "cpu", label: "CPU busy", unit: "%", max: 100, dec: 0, series: c => [{f: "cpu_busy", c}],
    head: p => p.cpu_busy, sub: p => `I/O wait ${fmtN(p.cpu_iowait, 0)}%`},
-  {key: "disk", label: "Disk MB/s", unit: "MB/s", dec: 1, series: c => [{f: "read_mb", c}, {f: "write_mb", c: "var(--muted)"}],
+  {key: "disk", label: "Disk MB/s", unit: "MB/s", dec: 1, stack: RW_MB,
    head: p => (p.read_mb || 0) + (p.write_mb || 0), sub: p => `read ${fmtN(p.read_mb, 1)} · write ${fmtN(p.write_mb, 1)}`},
-  {key: "iops", label: "Disk IOPS", unit: "", dec: 0, series: c => [{f: "iops", c}], head: p => p.iops, sub: () => "reads + writes"},
+  {key: "iops", label: "Disk IOPS", unit: "", dec: 0, stack: RW_IOPS,
+   head: p => p.iops, sub: p => p.read_iops === undefined ? "reads + writes" : `read ${fmtN(p.read_iops, 0)} · write ${fmtN(p.write_iops, 0)}`},
 ];
+const DISKIO = {key: "diskio", label: "Disk IOPS", unit: "", dec: 0, stack: RW_IOPS, head: p => p.iops,
+  sub: p => `read ${fmtN(p.read_iops, 0)} · write ${fmtN(p.write_iops, 0)} · ${fmtN((p.read_mb || 0) + (p.write_mb || 0), 1)} MB/s`};
 const TPS = {key: "tps", label: "MySQL tx/s", unit: "", dec: 0, series: c => [{f: "tps", c}], head: p => p.tps, sub: () => "commits + rollbacks"};
 const QPS = {key: "qps", label: "MySQL QPS", unit: "", dec: 0, series: c => [{f: "qps", c}], head: p => p.qps, sub: () => "statements/s, all sessions"};
 function loadTile(id, def) {
   return `<div class="card load" id="${id}"><div class="row"><span class="k">${def.label}</span>
-</div>
+    ${def.stack ? `<span class="legend"><i class="rd"></i>read<i class="wr"></i>write</span>` : ""}</div>
     <div class="v num">–</div><div class="s"></div><svg class="spark" viewBox="0 0 300 50" preserveAspectRatio="none"></svg></div>`;
 }
 function drawLoad(id, def, series, enabled, color, why) {
@@ -278,7 +308,9 @@ function drawLoad(id, def, series, enabled, color, why) {
   v.innerHTML = `${fmtN(def.head(last), def.dec)}${def.unit ? `<small>${def.unit}</small>` : ""}`;
   s.textContent = def.sub(last);
   el.style.color = "";
-  svg.innerHTML = spark(series, def.series(color), def.max);
+  svg.innerHTML = def.stack && series.some(p => p[def.stack[0].f] !== undefined)
+    ? stackedSpark(series, def.stack)
+    : spark(series, def.series ? def.series(color) : [{f: "iops", c: color}], def.max);
 }
 
 /* ---------- layout ---------- */
@@ -298,7 +330,7 @@ function build() {
     </div>`).join("");
   document.getElementById("primary").innerHTML = `<div class="who"><div class="k">Primary · HammerDB</div>
       <div class="name" id="pname"></div><div class="sub" id="psub"></div></div>
-    ${loadTile("p-cpu", LOADS[0])}${loadTile("p-disk", LOADS[1])}
+    ${loadTile("p-cpu", LOADS[0])}${loadTile("p-disk", DISKIO)}
     ${loadTile("p-qps", QPS)}${loadTile("p-tps", TPS)}`;
   built = n;
 }
@@ -319,7 +351,7 @@ function render() {
   document.getElementById("pname").textContent = L.label;
   document.getElementById("psub").textContent = `${L.host} · ${L.cpus} CPUs`;
   drawLoad("p-cpu", LOADS[0], L.series, L.system_stats, "var(--accent)", "not available");
-  drawLoad("p-disk", LOADS[1], L.series, L.system_stats, "var(--accent)", "not available");
+  drawLoad("p-disk", DISKIO, L.series, L.system_stats, "var(--accent)", "not available");
   drawLoad("p-qps", QPS, L.series, L.qps_stats, "var(--accent)", "no [primary] in the config");
   drawLoad("p-tps", TPS, L.series, L.db_stats, "var(--accent)", "no [primary] in the config");
 

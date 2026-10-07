@@ -112,6 +112,8 @@ class Sampler(threading.Thread):
             pt["read_mb"] = round(d["read_bytes"] / dt / 1048576, 2)
             pt["write_mb"] = round(d["write_bytes"] / dt / 1048576, 2)
             pt["iops"] = round((d["read_ios"] + d["write_ios"]) / dt, 0)
+            pt["read_iops"] = round(d["read_ios"] / dt, 0)
+            pt["write_iops"] = round(d["write_ios"] / dt, 0)
         if a.get("tx") is not None and b.get("tx") is not None:
             pt["tps"] = round(max(0.0, b["tx"] - a["tx"]) / dt, 1)
         if a.get("q") is not None and b.get("q") is not None:
