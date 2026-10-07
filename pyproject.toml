@@ -21,4 +21,4 @@ tplytics = "tplytics.cli:main"
 packages = ["tplytics"]
 
 [tool.setuptools.package-data]
-tplytics = ["queries/*.toml"]
+tplytics = ["queries/*.toml", "dashboard.html"]

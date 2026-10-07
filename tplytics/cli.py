@@ -18,6 +18,7 @@ examples:
   tplytics demo --engine mysql --host db1 --user tpcc --password secret
   tplytics serial --engine postgresql --host db1 --iterations 5 --json serial.json
   tplytics concurrent --threads 8 --duration 600 --think 5 --json conc.json --raw conc.csv
+  tplytics dashboard --listen 0.0.0.0 --http-port 8080  # live demo page in the browser
   tplytics list --engine postgresql
   tplytics sql Q15 --engine mysql            # print one random variant of a query
 
@@ -124,6 +125,18 @@ def build_parser():
     p.add_argument("--raw", default=None, metavar="FILE", help="CSV log of every execution")
     p.set_defaults(func=modes.concurrent, mode="concurrent")
 
+    p = sub.add_parser("dashboard", help="web page that runs the queries in a loop (demo mode, live)")
+    add_common(p)
+    p.add_argument("--listen", default="127.0.0.1",
+                   help="address to listen on (default 127.0.0.1; 0.0.0.0 for all interfaces)")
+    p.add_argument("--http-port", type=int, default=8080, help="HTTP port of the dashboard (default 8080)")
+    p.add_argument("--delay", type=float, default=1.0, help="pause between queries in seconds (default 1)")
+    p.add_argument("--show-rows", type=int, default=5, help="result rows kept per query (default 5)")
+    p.add_argument("--start-paused", action="store_true", help="wait for Resume in the browser")
+    p.add_argument("--refresh", type=float, default=60,
+                   help="seconds between re-reading the database size and time range (default 60)")
+    p.set_defaults(func=run_dashboard, mode=None)
+
     p = sub.add_parser("info", help="show what the benchmark discovers about the database")
     add_common(p)
     p.set_defaults(func=cmd_info, mode=None)
@@ -137,6 +150,11 @@ def build_parser():
     add_common(p)
     p.set_defaults(func=cmd_sql, mode=None)
     return ap
+
+
+def run_dashboard(ctx):
+    from .dashboard import dashboard
+    dashboard(ctx)
 
 
 def split_ids(s):

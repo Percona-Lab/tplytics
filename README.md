@@ -19,7 +19,8 @@ writing to, and how much each workload slows the other down.
   by default) are recorded and reported. They never stop the run.
 * **Engine variants** in the style of ClickBench: a query can carry different
   SQL for different engines or be marked as not supported by an engine.
-* Three modes: **demo**, **serial** and **concurrent**.
+* Three modes: **demo**, **serial** and **concurrent**, plus a live **dashboard**
+  that runs the queries in a loop in the browser.
 
 Supported engines: MySQL / Percona Server (`mysql`), MariaDB (`mariadb`) and
 PostgreSQL (`postgresql`). Other engines can be added easily (see
@@ -128,6 +129,27 @@ cancelled and left out of the results.
 ```
 ./tplytics.py concurrent --threads 16 --duration 1800 --warmup 60 --think 20
 ```
+
+### dashboard (live demo in the browser)
+
+The dashboard runs the queries one after another in an endless loop, like demo
+mode, and serves a web page that shows every query with the execution time and
+row count of its last run, its average, and how many runs it has had. The query
+currently running is marked and its timer counts up live. Click a query to see
+its description, tables and weights, the parameters and SQL of its last
+execution, its first 5 result rows, any error, and its min/avg/max statistics.
+**Pause** stops the loop after the current query, and **Resume** continues it.
+
+```
+./tplytics.py dashboard --defaults-file ~/.my.cnf                         # http://127.0.0.1:8080/
+./tplytics.py dashboard --listen 0.0.0.0 --http-port 8080 --delay 2 --timeout 120
+```
+
+The page only shows what the query files and the engine layer provide. Adding
+a query or an engine variant (see below) needs no change to the dashboard. The
+dashboard has no authentication. It listens on 127.0.0.1 unless you pass
+`--listen`, so put it behind a firewall or an SSH tunnel when the database is
+not a test system.
 
 ### Other commands
 
