@@ -145,6 +145,8 @@ def build_parser():
     p.add_argument("--order", choices=["sequential", "weighted"], default="sequential",
                    help="sequential: Q01..Q20 in turn; weighted: random by concurrent weight")
     p.add_argument("--history", type=int, default=10, help="finished queries listed at the bottom (default 10)")
+    p.add_argument("--rounds", type=int, default=10,
+                   help="completed rounds (one run of every query) listed at the bottom (default 10)")
     p.add_argument("--system-stats", choices=["auto", "off"], default="auto",
                    help="CPU and disk charts from /proc of this host (auto: on Linux)")
     p.add_argument("--show-rows", type=int, default=5, help="result rows kept per query (default 5)")

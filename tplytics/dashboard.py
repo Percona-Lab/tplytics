@@ -24,6 +24,7 @@ from . import params as P
 from .modes import fmt_value
 from .runner import Runner, OK
 from .state import StateRefresher
+from .stats import geomean
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 SERIES_POINTS = 180          # 3 minutes of 1-second samples
@@ -137,6 +138,10 @@ class Loop(threading.Thread):
         self.next_start = None
         self.executed = 0
         self.stats = {q.id: {"runs": 0, "ok": 0, "total": 0.0} for q in self.queries}
+        # a round is one execution of every supported query (len(queries) executions)
+        self.rounds = collections.deque(maxlen=a.rounds)
+        self.rounds_done = 0
+        self.round = None
         self.rng = random.Random(a.seed)
         self.runner = Runner(ctx.engine, a.timeout, a.init_sql)
 
@@ -179,6 +184,9 @@ class Loop(threading.Thread):
                     self.history.appendleft(self.current)
                 self.current = entry
                 self.next_start = None
+                if self.round is None:
+                    self.round = {"n": self.rounds_done + 1, "started": time.time(), "finished": None,
+                                  "times": [], "ok": 0, "errors": 0, "timeouts": 0, "executed": 0}
             started = time.time()
             r = self.runner.run(q.id, sql, keep_rows=a.show_rows, params=values)
             with self.lock:
@@ -188,6 +196,7 @@ class Loop(threading.Thread):
                 if r.status == OK:
                     st["ok"] += 1
                     st["total"] += r.elapsed
+                self._count_round(r)
                 entry.update({
                     "state": "waiting", "status": r.status, "elapsed": r.elapsed, "rows": r.rows,
                     "error": r.error, "finished": time.time(), "columns": r.columns or [],
@@ -198,11 +207,43 @@ class Loop(threading.Thread):
                 # visible for at least min_display seconds
                 self.next_start = max(started + a.interval, time.time() + a.min_display)
 
+    def _count_round(self, r):
+        rd = self.round
+        rd["executed"] += 1
+        if r.status == OK:
+            rd["ok"] += 1
+            rd["times"].append(r.elapsed)
+        elif r.status == "timeout":
+            rd["timeouts"] += 1
+        else:
+            rd["errors"] += 1
+        if rd["executed"] >= len(self.queries):
+            rd["finished"] = time.time()
+            rd["geomean"] = geomean(rd["times"])
+            rd["total"] = sum(rd["times"])
+            del rd["times"]
+            self.rounds.appendleft(rd)
+            self.rounds_done += 1
+            self.round = None
+
+    def overall_geomean(self):
+        """Geometric mean of the per-query average times, once every query has run (round 1 done)."""
+        if not self.rounds_done:
+            return None
+        return geomean([st["total"] / st["ok"] for st in self.stats.values() if st["ok"]])
+
     def snapshot(self):
         with self.lock:
+            rd = self.round
             return {"current": dict(self.current) if self.current else None,
                     "history": [dict(h) for h in self.history],
-                    "next_start": self.next_start, "executed": self.executed}
+                    "next_start": self.next_start, "executed": self.executed,
+                    "queries_per_round": len(self.queries),
+                    "geomean": self.overall_geomean(), "rounds_done": self.rounds_done,
+                    "rounds": [dict(x) for x in self.rounds],
+                    "round_progress": {"n": rd["n"], "executed": rd["executed"],
+                                       "geomean": geomean(rd["times"])} if rd else None}
+
 
 
 def make_handler(loop, sampler, ctx):

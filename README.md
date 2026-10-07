@@ -148,7 +148,17 @@ serves a live web page:
   state. While it is **running**, the page shows the SQL and a live timer. Once
   it finishes it shows **waiting**, with its response time, rows, status, the
   first 5 rows (or the error) and a countdown to the next query.
-* **Recent queries** at the bottom: the last `--history` (10) finished queries,
+* **Query geomean** (top row): the geometric mean of the per-query average
+  times over everything run so far. It appears once the first round is
+  complete, that is, once every query has run at least once. Its sparkline
+  shows the geomean of each completed round.
+* **Rounds** at the very bottom: the last `--rounds` (10) completed rounds,
+  newest first. A round is one run of every query (in `--order weighted` it is
+  the same number of executions, picked at random). Each row shows the start,
+  end and duration of the round, its successes, errors and timeouts, the
+  geomean of its successful execution times, and the change from the previous
+  round. The round in progress is shown above them with its geomean so far.
+* **Recent queries** below the current query: the last `--history` (10) finished queries,
   newest first. When a new query starts, the finished one slides in at the top
   and the oldest drops off the bottom. Click a row for its description,
   parameters, result rows and SQL.

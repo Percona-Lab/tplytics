@@ -44,7 +44,8 @@ h2.section { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; 
              margin: 22px 0 8px; font-weight: 650; }
 
 /* ---- stat tiles ---- */
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1250px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1000px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) {
   .wrap { padding: 0 16px 24px; } .tiles { gap: 8px; }
@@ -123,6 +124,17 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 12.5
 .hrow.fresh { animation: slidein .6s ease-out; }
 @keyframes slidein { from { background: var(--sel); transform: translateY(-8px); opacity: 0; } to { opacity: 1; } }
 .empty { color: var(--muted); padding: 22px 16px; }
+#rounds table { width: 100%; border-collapse: collapse; }
+#rounds th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary);
+             font-weight: 600; text-align: right; padding: 9px 16px; border-bottom: 1px solid var(--line); }
+#rounds td { padding: 8px 16px; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; }
+#rounds tr:last-child td { border-bottom: 0; }
+#rounds th:first-child, #rounds td:first-child, #rounds th.l, #rounds td.l { text-align: left; }
+#rounds td.gm { font-weight: 700; }
+#rounds tr.prog td { color: var(--text-secondary); font-style: italic; }
+.rbar { height: 8px; border-radius: 0 4px 4px 0; background: var(--series-1); min-width: 2px; }
+.delta-up { color: var(--critical); } .delta-down { color: var(--good); }
+@media (max-width: 760px) { #rounds .opt { display: none; } }
 </style>
 </head>
 <body>
@@ -146,6 +158,9 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 12.5
       <span class="c-avg">Query avg</span></div>
     <div id="hlist"><div class="empty">Finished queries appear here, newest first.</div></div>
   </div>
+
+  <h2 class="section" id="roundsTitle">Rounds</h2>
+  <div class="card" id="rounds"><div class="empty">A round is one run of every query. Completed rounds appear here, newest first.</div></div>
 </div>
 
 <script>
@@ -175,7 +190,15 @@ const TILES = [
    sub: () => "reads + writes, all disks"},
   {key: "tps", label: "DB transactions/s", unit: "", series: [{f: "tps", name: "tx/s", color: "--series-1"}], dec: 0, need: "db",
    sub: () => "commits + rollbacks, all sessions"},
+  {key: "geo", label: "Query geomean", unit: "", series: [{f: "gm", name: "round geomean", color: "--series-1"}], need: "rounds",
+   slots: 10, time: true},
 ];
+// points for a tile: system samples, or one point per completed round (oldest first)
+function tilePoints(t) {
+  if (t.need === "rounds") return (S.rounds || []).slice().reverse().filter(r => r.geomean).map(r => ({t: r.finished, gm: r.geomean, n: r.n}));
+  return (S.series || []).filter(p => p[t.series[0].f] !== undefined);
+}
+function fmtV(t, v) { return t.time ? fmtT(v) : fmtN(v, t.dec) + (t.unit ? " " + t.unit : ""); }
 function buildTiles() {
   const el = document.getElementById("tiles");
   el.innerHTML = TILES.map(t => `<div class="card tile" id="tile-${t.key}">
@@ -187,14 +210,15 @@ function buildTiles() {
   TILES.forEach(t => {
     const tile = document.getElementById("tile-" + t.key), svg = tile.querySelector("svg"), tip = tile.querySelector(".tip");
     svg.addEventListener("mousemove", ev => {
-      const pts = (S && S.series || []).filter(p => p[t.series[0].f] !== undefined);
+      if (!S) return;
+      const pts = tilePoints(t), slots = t.slots || 180;
       if (pts.length < 2) return;
-      const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * 179 - (180 - pts.length);
+      const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * (slots - 1) - (slots - pts.length);
       const i = Math.max(0, Math.min(pts.length - 1, Math.round(x)));
       t.hover = i;
       drawTile(t);
       const p = pts[i];
-      tip.innerHTML = `${clock(p.t)}<br>` + t.series.map(s => `${s.name}: <b>${fmtN(p[s.f], t.dec)}${t.unit ? " " + t.unit : ""}</b>`).join("<br>");
+      tip.innerHTML = (p.n ? `round ${p.n} · ` : "") + `${clock(p.t)}<br>` + t.series.map(s => `${s.name}: <b>${fmtV(t, p[s.f])}</b>`).join("<br>");
       tip.style.display = "block";
       const tr = tile.getBoundingClientRect();
       let left = ev.clientX - tr.left + 12;
@@ -211,23 +235,37 @@ function niceMax(v) {
 }
 function drawTile(t) {
   const tile = document.getElementById("tile-" + t.key);
-  const enabled = t.need === "system" ? S.system_stats : S.db_stats;
-  const pts = (S.series || []).filter(p => p[t.series[0].f] !== undefined);
+  const enabled = t.need === "system" ? S.system_stats : t.need === "db" ? S.db_stats : true;
+  const pts = tilePoints(t), slots = t.slots || 180;
   const val = tile.querySelector(".value"), sub = tile.querySelector(".sub"), svg = tile.querySelector("svg");
   if (!enabled) { val.innerHTML = "–"; sub.textContent = t.need === "system" ? "not available on this host" : "not available for this engine"; svg.innerHTML = ""; return; }
+  if (t.need === "rounds") {
+    if (S.geomean === null || S.geomean === undefined) {
+      const done = S.round_progress ? S.round_progress.executed : 0;
+      val.innerHTML = "–";
+      sub.textContent = `shown after the first round · ${done} of ${S.queries_per_round} queries done`;
+    } else {
+      val.textContent = fmtT(S.geomean);
+      const last = S.rounds[0];
+      sub.textContent = `per-query averages, ${S.rounds_done} round${S.rounds_done === 1 ? "" : "s"}` + (last ? ` · last round ${fmtT(last.geomean)}` : "");
+    }
+  }
   if (!pts.length) { svg.innerHTML = ""; return; }
   const last = pts[pts.length - 1];
-  const head = t.series.reduce((a, s) => a + (last[s.f] || 0), 0);
-  val.innerHTML = `${fmtN(head, t.dec)}${t.unit ? `<small>${t.unit}</small>` : ""}`;
-  sub.textContent = t.sub(last);
+  if (t.need !== "rounds") {
+    const head = t.series.reduce((a, s) => a + (last[s.f] || 0), 0);
+    val.innerHTML = `${fmtN(head, t.dec)}${t.unit ? `<small>${t.unit}</small>` : ""}`;
+    sub.textContent = t.sub(last);
+  }
   const W = 300, H = 54;
   const ymax = t.max || niceMax(Math.max(...pts.flatMap(p => t.series.map(s => p[s.f] || 0))) * 1.1);
-  const X = i => (i + (180 - pts.length)) / 179 * W, Y = v => H - 2 - (v / ymax) * (H - 4);
+  const X = i => (i + (slots - pts.length)) / (slots - 1) * W, Y = v => H - 2 - (v / ymax) * (H - 4);
   let h = `<line class="grid" x1="0" x2="${W}" y1="${H - 1}" y2="${H - 1}"/><line class="grid" x1="0" x2="${W}" y1="${Y(ymax / 2)}" y2="${Y(ymax / 2)}"/>`;
   t.series.forEach((s, k) => {
     const line = pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p[s.f] || 0).toFixed(1)}`).join("");
     if (k === 0 && t.series.length === 1) h += `<path class="area" style="fill:var(${s.color})" d="${line}L${X(pts.length - 1)},${H}L${X(0)},${H}Z"/>`;
     h += `<path class="line" style="stroke:var(${s.color})" d="${line}"/>`;
+    if (t.need === "rounds") pts.forEach((p, i) => { h += `<circle cx="${X(i)}" cy="${Y(p[s.f])}" r="2.5" style="fill:var(${s.color})" vector-effect="non-scaling-stroke"/>`; });
   });
   if (t.hover !== null && t.hover !== undefined && t.hover < pts.length) h += `<line class="cross" x1="${X(t.hover)}" x2="${X(t.hover)}" y1="0" y2="${H}"/>`;
   svg.innerHTML = h;
@@ -318,6 +356,36 @@ function renderHistory() {
   shownSeqs = seqs;
 }
 
+/* ---------- rounds: geomean of every query execution in one pass over all queries ---------- */
+let roundsKey = null;
+function renderRounds() {
+  const el = document.getElementById("rounds"), rs = S.rounds || [], pr = S.round_progress;
+  const key = JSON.stringify([rs.map(r => r.n), pr && pr.executed]);
+  if (key === roundsKey) return;
+  roundsKey = key;
+  document.getElementById("roundsTitle").textContent = rs.length ? `Rounds (last ${rs.length} of ${S.rounds_done})` : "Rounds";
+  if (!rs.length && !pr) return;
+  const maxG = Math.max(0.001, ...rs.map(r => r.geomean || 0));
+  let h = `<table><tr><th>Round</th><th class="opt">Started</th><th class="opt">Finished</th><th class="opt">Duration</th>
+      <th>OK</th><th class="opt">Errors</th><th class="opt">Timeouts</th><th>Geomean</th><th>vs previous</th><th class="l" style="width:22%"></th></tr>`;
+  if (pr) h += `<tr class="prog"><td>${pr.n}</td><td class="opt" colspan="3">in progress · ${pr.executed} of ${S.queries_per_round} queries</td>
+      <td></td><td class="opt"></td><td class="opt"></td><td>${pr.geomean ? fmtT(pr.geomean) + " so far" : "–"}</td><td></td><td></td></tr>`;
+  rs.forEach((r, i) => {
+    const prev = rs[i + 1];
+    let d = "–";
+    if (prev && prev.geomean && r.geomean) {
+      const pct = 100 * (r.geomean / prev.geomean - 1);
+      d = `<span class="${pct > 0 ? "delta-up" : "delta-down"}">${pct > 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%</span>`;
+    }
+    h += `<tr><td>${r.n}</td><td class="opt">${clock(r.started)}</td><td class="opt">${clock(r.finished)}</td>
+      <td class="opt">${fmtT(r.finished - r.started)}</td><td>${r.ok}</td>
+      <td class="opt ${r.errors ? "delta-up" : ""}">${r.errors}</td><td class="opt ${r.timeouts ? "delta-up" : ""}">${r.timeouts}</td>
+      <td class="gm">${fmtT(r.geomean)}</td><td>${d}</td>
+      <td class="l"><div class="rbar" style="width:${r.geomean ? Math.max(1, 100 * r.geomean / maxG) : 0}%" title="${fmtT(r.geomean)}"></div></td></tr>`;
+  });
+  el.innerHTML = h + "</table>";
+}
+
 async function poll() {
   try {
     const r = await fetch("api/state");
@@ -332,6 +400,7 @@ async function poll() {
     TILES.forEach(drawTile);
     renderCurrent();
     renderHistory();
+    renderRounds();
   } catch (e) {
     document.getElementById("pill").textContent = "disconnected";
   }
