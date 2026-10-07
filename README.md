@@ -178,6 +178,58 @@ the database is not a test system.
 | `list` | queries, complexity, tables, weights, concurrent probability, and support per engine |
 | `info` | what the benchmark discovers about the database (size, time range) |
 | `sql [ids]` | print queries with freshly generated parameters, without running them |
+| `heartbeat update\|monitor\|check` | replication lag from a heartbeat row, see [Heartbeat](#heartbeat-replication-lag) |
+
+## Heartbeat: replication lag
+
+Analytical queries often run on a replica, so how fresh the replica is matters
+as much as how fast it answers. `tplytics heartbeat` measures that end to end,
+the way [pt-heartbeat](https://docs.percona.com/percona-toolkit/pt-heartbeat.html)
+does, on any engine tplytics supports, including the DBTrail copy:
+
+* `update` runs against the primary. It creates the table `tplytics_heartbeat`
+  if needed and, every `--interval` seconds (1 by default, on round multiples of
+  the interval), updates row `--id` with a sequence number, its own clock in
+  UTC microseconds and the interval.
+* `monitor` reads that row from a replica, by default every second at half an
+  interval after the writes (`--skew`), and reports the lag. It logs a summary
+  line every `--report-interval` seconds, rewrites `--status-file` after every
+  read and, with `--http-port`, serves the same JSON on `/api/heartbeat`.
+* `check` reads once and exits 0 (lag at or under `--max-lag`), 1 (over) or
+  2 (cannot be measured), for alerting.
+
+```bash
+tplytics heartbeat update  --defaults-file /etc/tplytics/primary.cnf
+tplytics heartbeat monitor --defaults-file ~/.my.cnf --label replica --http-port 8091
+tplytics heartbeat monitor --engine dbtrail --defaults-file dbtrail.cnf --label dbtrail --interval 5
+tplytics heartbeat check   --defaults-file ~/.my.cnf --max-lag 10
+```
+
+**Lag** is how long the replica has been missing the beat after the one it
+shows: `max(0, read time - (beat time + writer interval))`. A replica that has
+every beat already written reports 0; one that is behind reports its delay to
+within one interval. **Age** is the plain age of the row it read. The monitor's
+clock is compared with the writer's, so keep the hosts in sync with NTP. The
+timestamp is written as a number by tplytics, not taken from a database
+function, so the same table and statements work everywhere; the monitor's
+interval does not have to match the writer's, which it reads from the row.
+
+The writer needs only `CREATE, SELECT, INSERT, UPDATE` on the heartbeat table
+(on MySQL: `GRANT CREATE, SELECT, INSERT, UPDATE ON tpcc.tplytics_heartbeat TO ...`).
+Use a separate `--id` for each writer. On DBTrail the table appears in the copy
+with the next snapshot or scheduled refresh after it is created, and the lag
+then shows how fresh the copy is, refresh interval included.
+
+`scripts/install-heartbeat.sh NAME update|monitor [options]` installs either
+side as the systemd service `tplytics-heartbeat@NAME` (a copy in
+`/opt/tplytics`, settings in `/etc/tplytics/heartbeat-NAME.env`, monitor status
+in `/run/tplytics/NAME.json`):
+
+```bash
+scripts/install-heartbeat.sh primary update --defaults-file /etc/tplytics/primary.cnf
+scripts/install-heartbeat.sh replica monitor --defaults-file /root/.my.cnf --http-port 8091
+journalctl -fu tplytics-heartbeat@replica
+```
 
 ## Running next to HammerDB
 
@@ -395,7 +447,7 @@ same machine:
 ## Tests
 
 ```bash
-python3 -m unittest discover tests          # offline: all queries render for all engines
+python3 -m unittest discover tests          # offline: queries render for all engines; heartbeat on SQLite
 ./tplytics.py serial --query-dir tests/fixtures/queries --timeout 5 -n 2 -v
                                              # live: error, timeout, unsupported and OK cases
 ```

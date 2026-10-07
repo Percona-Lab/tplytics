@@ -1,0 +1,27 @@
+# tplytics heartbeat as a service: one instance per writer or monitored replica.
+# The instance name selects /etc/tplytics/heartbeat-<instance>.env, which sets
+# HEARTBEAT_ARGS (split on spaces, so no spaces inside arguments), e.g.
+#   HEARTBEAT_ARGS=update --defaults-file /etc/tplytics/primary.cnf
+#   HEARTBEAT_ARGS=monitor --label replica --status-file /run/tplytics/replica.json
+# scripts/install-heartbeat.sh writes the file and enables the unit.
+[Unit]
+Description=tplytics heartbeat (%i)
+After=network-online.target mysql.service postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/tplytics/heartbeat-%i.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/tplytics/tplytics.py heartbeat $HEARTBEAT_ARGS
+Restart=always
+RestartSec=5
+RuntimeDirectory=tplytics
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

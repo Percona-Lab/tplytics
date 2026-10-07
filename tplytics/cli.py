@@ -55,6 +55,11 @@ def env(name, default=None):
 
 
 def add_common(p, need_db=True):
+    add_connection(p, need_db)
+    add_query_options(p, need_db)
+
+
+def add_connection(p, need_db=True):
     g = p.add_argument_group("database connection")
     g.add_argument("--engine", "-e", default=env("ENGINE", "mysql"),
                    help="database engine: %s (default mysql)" % ", ".join(sorted(ENGINES)))
@@ -69,6 +74,9 @@ def add_common(p, need_db=True):
         g.add_argument("--defaults-file", default=None, help="MySQL option file with connection settings")
         g.add_argument("--init-sql", action="append", default=[], metavar="SQL",
                        help="statement run on every new connection (repeatable)")
+
+
+def add_query_options(p, need_db=True):
     g = p.add_argument_group("queries")
     g.add_argument("--queries", "-q", default=None, help="comma separated ids to run (e.g. Q01,Q05,7)")
     g.add_argument("--exclude", "-x", default=None, help="comma separated ids to skip")
@@ -145,6 +153,43 @@ def build_parser():
                    help="seconds between re-reading the database size and time range (default 60)")
     p.set_defaults(func=run_dashboard, mode=None)
 
+    p = sub.add_parser("heartbeat", formatter_class=argparse.RawDescriptionHelpFormatter,
+                       help="replication lag from a heartbeat row (like pt-heartbeat)",
+                       description="End-to-end replication lag. 'update' writes a heartbeat row on the "
+                                   "primary every --interval seconds; 'monitor' reads it on a replica and "
+                                   "reports how old it is; 'check' reads it once (exit 0 OK, 1 over "
+                                   "--max-lag, 2 unknown). Lag compares the monitor's clock with the "
+                                   "writer's, so keep both hosts in sync with NTP.",
+                       epilog="examples:\n"
+                              "  tplytics heartbeat update  --defaults-file /etc/tplytics/primary.cnf\n"
+                              "  tplytics heartbeat monitor --defaults-file ~/.my.cnf --label replica \\\n"
+                              "                             --status-file /run/tplytics/replica.json\n"
+                              "  tplytics heartbeat monitor --engine dbtrail --defaults-file dbtrail.cnf "
+                              "--label dbtrail --http-port 8091\n"
+                              "  tplytics heartbeat check   --defaults-file ~/.my.cnf --max-lag 10")
+    p.add_argument("action", choices=["update", "monitor", "check"])
+    add_connection(p)
+    g = p.add_argument_group("heartbeat")
+    g.add_argument("--table", default="tplytics_heartbeat",
+                   help="heartbeat table, created by update when missing (default tplytics_heartbeat)")
+    g.add_argument("--id", type=int, default=1,
+                   help="heartbeat row; give each writer its own (default 1)")
+    g.add_argument("--interval", type=float, default=1.0, help="seconds between writes / reads (default 1)")
+    g.add_argument("--report-interval", type=float, default=60,
+                   help="seconds between summary lines (default 60)")
+    g.add_argument("--count", type=int, default=0, help="stop after this many writes / reads (default 0 = run forever)")
+    g.add_argument("--label", default=None, help="monitor: name of the replica in output (default: engine)")
+    g.add_argument("--status-file", default=None, metavar="FILE",
+                   help="monitor: JSON file rewritten after every read")
+    g.add_argument("--http-port", type=int, default=0, help="monitor: serve the status JSON on this port")
+    g.add_argument("--listen", default="127.0.0.1", help="monitor: address for --http-port (default 127.0.0.1)")
+    g.add_argument("--skew", type=float, default=None,
+                   help="monitor: read this many seconds after each write tick (default: half the interval)")
+    g.add_argument("--max-lag", type=float, default=None,
+                   help="check: lag in seconds above which the exit code is 1 (monitor: reported only)")
+    g.add_argument("--verbose", "-v", action="store_true", help="monitor: print every read")
+    p.set_defaults(func=run_heartbeat, mode=None)
+
     p = sub.add_parser("info", help="show what the benchmark discovers about the database")
     add_common(p)
     p.set_defaults(func=cmd_info, mode=None)
@@ -158,6 +203,11 @@ def build_parser():
     add_common(p)
     p.set_defaults(func=cmd_sql, mode=None)
     return ap
+
+
+def run_heartbeat(args):
+    from .heartbeat import heartbeat
+    return heartbeat(args)
 
 
 def run_dashboard(ctx):
@@ -246,7 +296,7 @@ def cmd_sql(args):
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    if args.func in (cmd_list, cmd_info, cmd_sql):
+    if args.func in (cmd_list, cmd_info, cmd_sql, run_heartbeat):
         return args.func(args)
     if args.timeout <= 0:
         raise SystemExit("--timeout must be positive")

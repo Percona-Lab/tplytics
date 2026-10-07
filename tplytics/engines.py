@@ -55,6 +55,16 @@ class Engine:
         _, rows = session.execute(self.activity_sql)
         return sum(float(r[-1] or 0) for r in rows)
 
+    # -- heartbeat ---------------------------------------------------------
+    #: False for read-only targets (a replica's copy) that cannot be the primary
+    heartbeat_writable = True
+    heartbeat_ts_type = "TIMESTAMP"
+
+    def heartbeat_ddl(self, table):
+        return ("CREATE TABLE IF NOT EXISTS %s (id INT NOT NULL PRIMARY KEY, seq BIGINT NOT NULL, "
+                "ts_us BIGINT NOT NULL, interval_us BIGINT NOT NULL, ts %s NOT NULL, writer VARCHAR(255))"
+                % (table, self.heartbeat_ts_type))
+
     # -- connections -----------------------------------------------------
     def connect(self):
         """Return a new Session."""
@@ -164,6 +174,7 @@ class MySQLEngine(Engine):
         return args
 
     activity_sql = "SHOW GLOBAL STATUS WHERE Variable_name IN ('Com_commit', 'Com_rollback')"
+    heartbeat_ts_type = "DATETIME"   # TIMESTAMP would follow the session time zone
 
     def timeout_statement(self, seconds):
         return "SET SESSION max_execution_time = %d" % int(seconds * 1000)
@@ -252,6 +263,7 @@ class DBTrailEngine(MySQLEngine):
     dialects = ["dbtrail", "duckdb", "mysql", "default"]
     default_port = 3309
     activity_sql = None   # the copy has no transaction counters
+    heartbeat_writable = False
 
     def connect(self):
         s = DBTrailSession(self)
