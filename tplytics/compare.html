@@ -50,8 +50,11 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .good { color: var(--good); } .warn { color: var(--warning); } .crit { color: var(--critical); } .dim { color: var(--muted); }
 
 /* ---- top strip: primary + comparison ---- */
-.primary-card { padding: 0.6rem 0.8rem; display: grid; grid-template-columns: 10rem repeat(4, minmax(0, 1fr)); gap: 0.8rem; align-items: stretch; }
-.primary-card .spark { height: 2.4rem; }
+.primary-card { padding: 0.5rem 0.8rem; display: grid; grid-template-columns: 10rem repeat(4, minmax(0, 1fr)); gap: 0.8rem;
+                align-items: stretch; margin-top: 0.8rem; }
+.primary-card .load { padding: 0.45rem 0.8rem 0.4rem; }
+.primary-card .load .v { font-size: 1.35rem; }
+.primary-card .spark { height: 1.8rem; margin-top: 0.15rem; }
 .primary-card .who .name { font-size: 1.1rem; font-weight: 700; margin-top: 0.2rem; line-height: 1.25; }
 .primary-card .who .sub { color: var(--text-secondary); font-size: 0.9rem; }
 .verdict { padding: 0.9rem 1.1rem; display: flex; flex-direction: column; justify-content: center; }
@@ -104,8 +107,13 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .state.running .dot { animation: pulse 1s infinite; }
 .state.done .dot { background: var(--muted); }
 @keyframes pulse { 50% { opacity: .2; } }
-.res { padding: 0.6rem 0.9rem; border-left: 0.35rem solid var(--tc); min-height: 10.6rem; }
-.res .top { display: flex; align-items: baseline; gap: 1.2rem; flex-wrap: wrap; }
+.res { padding: 0.6rem 0.9rem; border-left: 0.35rem solid var(--tc); min-height: 15rem; position: relative; }
+.res .top { padding-right: 15rem; }
+.res .corner { position: absolute; top: 0.7rem; right: 0.9rem; display: flex; gap: 0.5rem; align-items: center; }
+.sqllink { font-size: 0.9rem; font-weight: 650; color: var(--tc); text-decoration: none;
+           border: 1px solid var(--line); border-radius: 99px; padding: 0.15rem 0.7rem; white-space: nowrap; }
+.sqllink:hover { background: var(--surface-2); }
+.res .top { display: flex; align-items: baseline; gap: 0.6rem 1.2rem; flex-wrap: wrap; }
 .res .time { font-size: 3rem; font-weight: 800; line-height: 1.05; }
 .res .meta2 { color: var(--text-secondary); font-size: 1rem; }
 .res .winner { font-size: 1rem; font-weight: 750; padding: 0.15rem 0.7rem; border-radius: 99px; background: var(--tc); color: #fff; }
@@ -113,12 +121,12 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .bar > div { height: 100%; background: var(--tc); border-radius: 99px; transition: width .4s; }
 .status { font-weight: 700; }
 .status.ok { color: var(--good); } .status.error, .status.unsupported { color: var(--critical); } .status.timeout { color: var(--warning); }
-.result { overflow: hidden; margin-top: 0.3rem; max-height: 5.7rem; }
+.result { overflow: hidden; margin-top: 0.3rem; max-height: 10.2rem; }   /* header + 5 rows */
 .result table { border-collapse: collapse; font-size: 0.85rem; width: 100%; }
 .result th, .result td { padding: 0.2rem 0.6rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 .result th { color: var(--text-secondary); font-weight: 600; }
 .result td.n { text-align: right; font-variant-numeric: tabular-nums; }
-pre.err { color: var(--critical); white-space: pre-wrap; font: 0.85rem/1.4 ui-monospace, Menlo, Consolas, monospace; margin: 0.5rem 0 0; }
+pre.err { color: var(--critical); white-space: pre-wrap; font: 0.85rem/1.4 ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; margin: 0.5rem 0 0; }
 
 /* ---- bottom: per query + recent rounds ---- */
 
@@ -167,13 +175,13 @@ tr.errrow .who { font-weight: 700; font-size: 0.85rem; margin: 0.2rem 0; }
       <div class="card round" id="round"><div class="empty">Waiting for the first query…</div></div>
       <div class="cols" id="results"></div>
       <div class="card"><h2 id="recentTitle">Recent rounds</h2><div id="recent"></div></div>
-      <div class="card primary-card" id="primary"></div>
     </div>
     <div class="side">
       <div class="card verdict" id="verdict"></div>
       <div class="card"><h2>Per query: average time, all rounds so far</h2><div id="perq"></div></div>
     </div>
   </div>
+  <div class="card primary-card" id="primary"></div>
 </div>
 
 <script>
@@ -355,8 +363,10 @@ function renderRound() {
     const r = e.results[t.label], box = document.getElementById("res" + i);
     const running = r.state === "running", [tv, tu] = fmtTparts(times[i]);
     let h = `<div class="top"><span class="time num">${tv}<small style="font-size:1.4rem;color:var(--text-secondary);margin-left:.2rem">${tu}</small></span>
-      <span class="meta2">${running ? "running…" : `<span class="status ${r.status}">${ICON[r.status] || "•"} ${r.status}</span> · ${fmtN(r.rows, 0)} rows · this query's avg ${fmtT(r.avg)}`}</span>
-      ${i === best ? `<span class="winner">${r.speedup ? xFaster(r.speedup) + " faster" : "fastest"}</span>` : ""}</div>
+      <span class="meta2">${running ? "running…" : `<span class="status ${r.status}">${ICON[r.status] || "•"} ${r.status}</span> · ${fmtN(r.rows, 0)} rows · avg ${fmtT(r.avg)}`}</span></div>
+      <div class="corner">${i === best ? `<span class="winner">${r.speedup ? xFaster(r.speedup) + " faster" : "fastest"}</span>` : ""}
+      ${r.sql ? `<a class="sqllink" target="_blank" rel="noopener" title="The statement ${esc(t.label)} ran, in a new tab"
+         href="sql?round=${e.seq}&target=${encodeURIComponent(t.label)}">SQL ↗</a>` : ""}</div>
       <div class="bar"><div style="width:${times[i] ? Math.max(1, 100 * times[i] / maxT) : 0}%"></div></div>`;
     if (!running) {
       if (r.error) h += `<pre class="err">${esc(r.error)}</pre>`;
@@ -393,7 +403,7 @@ function renderPerQuery() {
 
 /* ---------- recent rounds ---------- */
 function renderRecent() {
-  const hist = (S.history || []).slice(0, 4), T = S.targets;
+  const hist = (S.history || []).slice(0, 3), T = S.targets;
   document.getElementById("recentTitle").textContent = hist.length ? `Recent rounds (last ${hist.length})` : "Recent rounds";
   const seqs = hist.map(h => h.seq).join();
   if (seqs === shownSeqs) return;

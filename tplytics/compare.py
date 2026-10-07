@@ -364,6 +364,14 @@ class CompareLoop(threading.Thread):
                 entry.update(state="done", finished=time.time())
                 self.next_start = max(started + a.interval, time.time() + a.min_display)
 
+    def find_round(self, seq):
+        """The current or a recent round by number, or None once it scrolled out."""
+        with self.lock:
+            for e in ([self.current] if self.current else []) + list(self.history):
+                if e["seq"] == seq:
+                    return _copy_entry(e)
+        return None
+
     def snapshot(self):
         with self.lock:
             per_q = []
@@ -436,8 +444,25 @@ def make_handler(loop, targets, local, primary, args):
                     self._send(200, fh.read(), "text/html; charset=utf-8")
             elif self.path == "/api/state":
                 self._send(200, json.dumps(state(), default=str), "application/json")
+            elif self.path.startswith("/sql?"):
+                self._sql()
             else:
                 self._send(404, "not found", "text/plain")
+
+        def _sql(self):
+            """The statement one target ran in a round, as its own page."""
+            from urllib.parse import parse_qs, urlsplit
+            qs = parse_qs(urlsplit(self.path).query)
+            try:
+                seq, label = int(qs["round"][0]), qs["target"][0]
+            except (KeyError, ValueError):
+                return self._send(400, "use /sql?round=N&target=LABEL", "text/plain")
+            e = loop.find_round(seq)
+            r = e and e["results"].get(label)
+            if not r:
+                return self._send(404, "round %d is no longer kept (the page keeps the last %d)"
+                                  % (seq, args.history + 1), "text/plain")
+            self._send(200, render_sql_page(e, label, r, args.title), "text/html; charset=utf-8")
 
         def do_POST(self):  # noqa: N802
             if self.path == "/api/pause":
@@ -449,6 +474,34 @@ def make_handler(loop, targets, local, primary, args):
             self._send(200, json.dumps({"running": loop.running.is_set()}), "application/json")
 
     return Handler
+
+
+def render_sql_page(e, label, r, title):
+    from html import escape as h
+    status = r.get("status") or "running"
+    took = "" if r.get("elapsed") is None else " in %.3f s" % r["elapsed"]
+    return """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%(qid)s on %(label)s · round %(seq)d</title>
+<style>
+:root { color-scheme: light dark; --bg: #f4f5f7; --fg: #0b0b0b; --mut: #52514e; --code: #fcfcfb; --line: #e1e0dc; }
+@media (prefers-color-scheme: dark) { :root { --bg: #121211; --fg: #fff; --mut: #c3c2b7; --code: #1a1a19; --line: #2c2c2a; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+h1 { font-size: 20px; margin: 0 0 4px; } p { color: var(--mut); margin: 4px 0; }
+pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
+      overflow-x: auto; font: 13.5px/1.55 ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; white-space: pre; }
+pre.err { color: #d03b3b; white-space: pre-wrap; }
+</style></head><body><div class="wrap">
+<h1>%(qid)s %(name)s · %(label)s</h1>
+<p>%(title)s · round %(seq)d · %(status)s%(took)s</p>
+<p>Parameters: %(params)s</p>
+<pre>%(sql)s;</pre>%(err)s
+</div></body></html>""" % {
+        "qid": h(e["id"]), "name": h(e["name"]), "label": h(label), "seq": e["seq"], "title": h(title),
+        "status": h(status), "took": took, "params": h(e.get("params") or "none"),
+        "sql": h((r.get("sql") or "-- not run").strip()),
+        "err": "<pre class=\"err\">%s</pre>" % h(r["error"]) if r.get("error") else ""}
 
 
 def compare(args):
