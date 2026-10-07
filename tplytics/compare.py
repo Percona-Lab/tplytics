@@ -269,6 +269,83 @@ class PassLog:
                     "queries": self.n}
 
 
+class ExecLog:
+    """Every execution (time, query, target, status, seconds) of the last keep_hours.
+
+    Kept per query in memory and appended to a JSON-lines file when a path is
+    given, so the per-query time charts survive restarts. The file is
+    rewritten without the aged-out lines at start and whenever the oldest line
+    is an hour past the window, which keeps it about keep_hours long.
+    """
+
+    def __init__(self, path, keep_hours):
+        self.path, self.keep = path, keep_hours * 3600
+        self.by_query = collections.defaultdict(collections.deque)
+        self.lock = threading.Lock()
+        self.oldest = None
+        if path:
+            self._load()
+
+    def _load(self):
+        cutoff = time.time() - self.keep
+        try:
+            with open(self.path) as fh:
+                for line in fh:
+                    try:
+                        p = json.loads(line)
+                    except ValueError:
+                        continue
+                    if p.get("t", 0) >= cutoff and p.get("q"):
+                        self.by_query[p["q"]].append(p)
+        except FileNotFoundError:
+            pass
+        self._rewrite()
+
+    def _all(self):
+        return sorted((p for d in self.by_query.values() for p in d), key=lambda p: p["t"])
+
+    def _rewrite(self):
+        pts = self._all()
+        self.oldest = pts[0]["t"] if pts else None
+        if not self.path:
+            return
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        tmp = self.path + ".tmp"
+        with open(tmp, "w") as fh:
+            for p in pts:
+                fh.write(json.dumps(p, separators=(",", ":")) + "\n")
+        os.replace(tmp, self.path)
+
+    def add(self, t, qid, label, status, elapsed):
+        p = {"t": round(t, 1), "q": qid, "target": label, "status": status,
+             "s": None if elapsed is None else round(elapsed, 4)}
+        with self.lock:
+            self.by_query[qid].append(p)
+            if self.oldest is None:
+                self.oldest = p["t"]
+            cutoff = t - self.keep
+            if self.oldest < cutoff - 3600:
+                for d in self.by_query.values():
+                    while d and d[0]["t"] < cutoff:
+                        d.popleft()
+                self._rewrite()
+            elif self.path:
+                with open(self.path, "a") as fh:
+                    fh.write(json.dumps(p, separators=(",", ":")) + "\n")
+
+    def for_query(self, qid, now=None):
+        cutoff = (now or time.time()) - self.keep
+        with self.lock:
+            return [p for p in self.by_query.get(qid, ()) if p["t"] >= cutoff]
+
+
+def _dialect_used(q, engine):
+    for d in engine.dialects:
+        if d in q.sql:
+            return d
+    return None
+
+
 # =================================================================== targets
 class Target:
     def __init__(self, opts, refresh):
@@ -378,6 +455,11 @@ class CompareLoop(threading.Thread):
         self.pairs = {t.label: PairStats() for t in targets[1:]}
         self.pairs_q = {q.id: {t.label: PairStats() for t in targets[1:]} for q in self.queries}
         self.passes = PassLog(args.history_file, args.keep_hours, args.timeout, len(self.queries))
+        exec_path = None
+        if args.history_file:
+            root, ext = os.path.splitext(args.history_file)
+            exec_path = root + "-executions" + (ext or ".jsonl")
+        self.execlog = ExecLog(exec_path, args.keep_hours)
 
     def _pick(self):
         if self.args.order == "weighted":
@@ -402,6 +484,10 @@ class CompareLoop(threading.Thread):
             st = self.per_query[q.id][t.label]
             st.add(r.status, r.elapsed)
             res["avg"] = st.avg
+        try:
+            self.execlog.add(time.time(), q.id, t.label, r.status, r.elapsed)
+        except OSError as e:
+            print("cannot write %s: %s" % (self.execlog.path, e), flush=True)
 
     def run(self):
         a = self.args
@@ -459,6 +545,26 @@ class CompareLoop(threading.Thread):
                 self.passes.add_round(results, time.time())
             except OSError as e:             # the chart is a bonus: never stop the board for it
                 print("cannot write %s: %s" % (self.passes.path, e), flush=True)
+
+    def query_detail(self, qid):
+        """What the per-query pop-up shows: the query, its SQL per target and 24 h of executions."""
+        q = next((x for x in self.queries if x.id == qid), None)
+        if q is None:
+            return None
+        sql = {}
+        for t in self.targets:
+            text = q.sql_for(t.engine)
+            sql[t.label] = {"engine": t.engine.name, "dialect": _dialect_used(q, t.engine) if text else None,
+                            "text": text}
+        texts = [v["text"] for v in sql.values() if v["text"] is not None]
+        with self.lock:
+            stats = {lbl: s.as_dict() for lbl, s in self.per_query[q.id].items()}
+            speedup = {lbl: p.ratio for lbl, p in self.pairs_q[q.id].items()}
+        return {"id": q.id, "name": q.name, "description": q.description, "complexity": q.complexity,
+                "tables": q.tables, "weight": q.weight, "params": q.params, "sql": sql,
+                "same_sql": len(set(texts)) <= 1, "stats": stats, "speedup": speedup,
+                "executions": self.execlog.for_query(q.id), "keep_hours": self.execlog.keep / 3600,
+                "timeout": self.args.timeout, "targets": [t.label for t in self.targets], "now": time.time()}
 
     def find_round(self, seq):
         """The current or a recent round by number, or None once it scrolled out."""
@@ -543,6 +649,13 @@ def make_handler(loop, targets, local, primary, args):
                     self._send(200, fh.read(), "text/html; charset=utf-8")
             elif self.path == "/api/state":
                 self._send(200, json.dumps(state(), default=str), "application/json")
+            elif self.path.startswith("/api/query?"):
+                from urllib.parse import parse_qs, urlsplit
+                qid = (parse_qs(urlsplit(self.path).query).get("id") or [""])[0]
+                d = loop.query_detail(qid)
+                if d is None:
+                    return self._send(404, json.dumps({"error": "unknown query %r" % qid}), "application/json")
+                self._send(200, json.dumps(d, default=str), "application/json")
             elif self.path == "/api/passes":
                 self._send(200, json.dumps(loop.passes.snapshot()), "application/json")
             elif self.path.startswith("/sql?"):

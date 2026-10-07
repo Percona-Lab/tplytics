@@ -205,6 +205,14 @@ over the queries per target, for the last `keep_hours` (24 by default; a
 timeout counts as the timeout). With `history_file` set those points are
 appended to a JSON-lines file and reloaded after a restart.
 
+Click a query in the per-query table (or in Recent rounds) for its details:
+the description, the SQL each engine runs (once when it is the same text,
+otherwise side by side with the differing lines and words highlighted), and
+every execution of that query on every target over the last `keep_hours`, on a
+log scale with timeouts and errors marked. Executions are kept in a second
+file next to `history_file` (`...-executions.jsonl`), so this chart survives
+restarts too.
+
 ```bash
 tplytics compare --config compare.toml          # http://127.0.0.1:8080/
 ```

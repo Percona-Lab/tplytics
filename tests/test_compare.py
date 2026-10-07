@@ -4,6 +4,7 @@ import math
 import os
 import sys
 import tempfile
+import time
 import types
 import unittest
 
@@ -123,6 +124,24 @@ class CompareTests(unittest.TestCase):
             self.assertEqual(old.snapshot()["points"], [])
             with open(path) as fh:
                 self.assertEqual([J.loads(x) for x in fh], [])
+
+
+    def test_exec_log(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x-executions.jsonl")
+            log = C.ExecLog(path, keep_hours=24)
+            now = time.time()
+            log.add(now - 30 * 3600, "Q01", "A", OK, 1.0)       # already outside the window
+            log.add(now - 10, "Q01", "A", OK, 0.5)
+            log.add(now - 9, "Q01", "B", ERROR, 0.1)
+            log.add(now - 8, "Q02", "A", TIMEOUT, 120.0)
+            q1 = log.for_query("Q01", now)
+            self.assertEqual([(p["target"], p["status"]) for p in q1], [("A", OK), ("B", ERROR)])
+            again = C.ExecLog(path, keep_hours=24)          # restart: reloaded, aged line dropped
+            self.assertEqual(len(again.for_query("Q01", now)), 2)
+            self.assertEqual(again.for_query("Q02", now)[0]["s"], 120.0)
+            with open(path) as fh:
+                self.assertEqual(len(fh.readlines()), 3)
 
 
 if __name__ == "__main__":

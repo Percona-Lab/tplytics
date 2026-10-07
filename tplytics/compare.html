@@ -157,6 +157,40 @@ tr.errrow .who { font-weight: 700; font-size: 0.85rem; margin: 0.2rem 0; }
 @keyframes slidein { from { opacity: 0; transform: translateY(-0.4rem); } to { opacity: 1; } }
 .empty { color: var(--muted); padding: 1rem; }
 
+/* ---- per-query pop-up ---- */
+.qlink { cursor: pointer; }
+table.t tr.qrow { cursor: pointer; }
+table.t tr.qrow:hover td { background: var(--surface-2); }
+.modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 50; display: flex; align-items: center;
+            justify-content: center; padding: 2vh 2vw; }
+.modal-bg[hidden] { display: none; }
+.modal { background: var(--surface-1); border: 1px solid var(--line); border-radius: 0.9rem; width: min(96vw, 1700px);
+         max-height: 94vh; overflow: auto; padding: 1rem 1.3rem 1.2rem; font-size: max(13px, 1rem); position: relative; }
+.modal .x { position: absolute; top: 0.6rem; right: 0.8rem; font-size: 1.6em; line-height: 1; background: none; border: 0;
+            color: var(--text-secondary); cursor: pointer; padding: 0.2rem 0.5rem; }
+.modal h3 { margin: 0 2.5rem 0.2rem 0; font-size: 1.6em; }
+.modal h3 .qid { margin-right: 0.6rem; }
+.modal .meta { color: var(--text-secondary); font-size: 0.9em; }
+.modal .desc { color: var(--text-secondary); margin: 0.5rem 0 0.8rem; max-width: 110em; }
+.modal h4 { font-size: 0.8em; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin: 1rem 0 0.4rem; }
+.sqlgrid { display: grid; gap: 0.8rem; }
+.sqlpane { min-width: 0; border: 1px solid var(--line); border-radius: 0.5rem; overflow: hidden; border-top: 0.25rem solid var(--tc); }
+.sqlpane .hd { padding: 0.35rem 0.7rem; font-weight: 700; color: var(--tc); background: var(--surface-2); font-size: 0.9em; }
+.sqlpane .hd span { color: var(--text-secondary); font-weight: 500; }
+.sqlpane pre { margin: 0; padding: 0.5rem 0; overflow-x: auto; background: var(--code);
+               font: 0.85em/1.5 ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+.sqlpane .ln { display: block; padding: 0 0.7rem; white-space: pre; min-height: 1.5em; }
+.sqlpane .ln.chg { background: color-mix(in srgb, var(--warning) 16%, transparent); }
+.sqlpane .ln.add { background: color-mix(in srgb, var(--good) 16%, transparent); }
+.sqlpane .ln.del { background: color-mix(in srgb, var(--critical) 14%, transparent); }
+.sqlpane .ln.gap { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--grid) 6px 8px); }
+.sqlpane mark { background: color-mix(in srgb, var(--warning) 45%, transparent); color: inherit; border-radius: 2px; }
+.qstats { display: flex; flex-wrap: wrap; gap: 0.3rem 1.6rem; font-size: 0.92em; color: var(--text-secondary); margin-bottom: 0.3rem; }
+.qstats b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+#qsvg { display: block; width: 100%; height: 15em; }
+#qsvg .ax { fill: var(--muted); font-size: 0.75em; }
+#qsvg .gl { stroke: var(--grid); stroke-width: 1; }
+
 /* ---- long-term chart ---- */
 .longterm { margin-top: 0.8rem; padding-bottom: 0.4rem; position: relative; }
 .longterm .lthead { display: flex; align-items: baseline; gap: 0.4rem 1.6rem; flex-wrap: wrap; padding: 0.7rem 1rem 0.2rem; }
@@ -212,6 +246,7 @@ tr.errrow .who { font-weight: 700; font-size: 0.85rem; margin: 0.2rem 0; }
     </div>
   </div>
   <div class="card primary-card" id="primary"></div>
+  <div class="modal-bg" id="qmodal" hidden><div class="modal" role="dialog" aria-modal="true" id="qbox"></div></div>
   <div class="card longterm" id="longterm">
     <div class="lthead"><h2 id="lttitle">Long term</h2><div class="ltleg" id="ltleg"></div></div>
     <svg id="ltsvg"></svg><div class="ltempty" id="ltempty"></div><div class="lttip" id="lttip"></div>
@@ -447,7 +482,7 @@ function renderPerQuery() {
     other ? `<th title="${esc(other)} vs ${esc(base)}">${esc(other)} is</th>` : ""}</tr>`;
   S.per_query.forEach(q => {
     const runs = Math.max(...T.map(t => q.stats[t.label].runs));
-    h += `<tr class="${q.id === cur ? "now" : ""}"><td><b>${q.id}</b></td><td class="qn">${esc(q.name)}</td><td class="n">${runs}</td>`;
+    h += `<tr class="qrow ${q.id === cur ? "now" : ""}" data-q="${q.id}" title="Details, SQL and times of ${q.id}"><td><b>${q.id}</b></td><td class="qn">${esc(q.name)}</td><td class="n">${runs}</td>`;
     T.forEach(t => {
       const s = q.stats[t.label];
       h += `<td class="n">${!q.supported[t.label] ? '<span class="dim">n/a</span>' : s.ok ? fmtT(s.avg) : s.runs ? `<span class="crit">${s.errors ? "error" : "timeout"}</span>` : "–"}</td>`;
@@ -472,7 +507,7 @@ function renderRecent() {
     <tr><th class="n">#</th><th>Time</th><th>Query</th>${T.map((t, i) => `<th class="n" style="color:${TC(i)}">${esc(t.label)}</th>`).join("")}${
     T.length > 1 ? `<th class="n">Ratio</th>` : ""}</tr>`;
   hist.forEach(e => {
-    h += `<tr class="${fresh.has(e.seq) && shownSeqs ? "fresh" : ""}"><td class="n dim">${e.seq}</td><td class="num dim">${clock(e.finished)}</td><td class="ql"><b>${e.id}</b> ${esc(e.name)}</td>`;
+    h += `<tr class="${fresh.has(e.seq) && shownSeqs ? "fresh" : ""}"><td class="n dim">${e.seq}</td><td class="num dim">${clock(e.finished)}</td><td class="ql qlink" data-q="${e.id}" title="Details, SQL and times of ${e.id}"><b>${e.id}</b> ${esc(e.name)}</td>`;
     T.forEach(t => {
       const r = e.results[t.label];
       h += `<td class="n">${r.status === "ok" ? fmtT(r.elapsed) : r.error
@@ -576,6 +611,164 @@ function drawLongTerm() {
   };
   svg.onmouseleave = () => { ltHover = null; document.getElementById("lttip").style.display = "none"; drawLongTerm(); };
 }
+
+/* ---------- per-query pop-up: SQL per engine with differences, 24 h of times ---------- */
+let QD = null, qOpen = null, qTimer = null;
+function lcs(a, b, eq) {                       // table of common-subsequence lengths
+  const m = a.length, n = b.length, L = Array.from({length: m + 1}, () => new Int32Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--)
+    L[i][j] = eq(a[i], b[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  return L;
+}
+function diffOps(a, b, eq) {                   // [["=", i, j] | ["-", i] | ["+", j]]
+  const L = lcs(a, b, eq), ops = [];
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) {
+    if (eq(a[i], b[j])) { ops.push(["=", i++, j++]); }
+    else if (L[i + 1][j] >= L[i][j + 1]) ops.push(["-", i++]);
+    else ops.push(["+", j++]);
+  }
+  while (i < a.length) ops.push(["-", i++]);
+  while (j < b.length) ops.push(["+", j++]);
+  return ops;
+}
+function markWords(x, y) {                     // the two lines with their differing words marked
+  const tok = s => s.match(/\s+|[A-Za-z0-9_.]+|[^\sA-Za-z0-9_.]/g) || [];
+  const a = tok(x), b = tok(y), ops = diffOps(a, b, (p, q) => p === q);
+  let ha = "", hb = "";
+  ops.forEach(o => {
+    if (o[0] === "=") { ha += esc(a[o[1]]); hb += esc(b[o[2]]); }
+    else if (o[0] === "-") ha += /^\s+$/.test(a[o[1]]) ? esc(a[o[1]]) : `<mark>${esc(a[o[1]])}</mark>`;
+    else hb += /^\s+$/.test(b[o[1]]) ? esc(b[o[1]]) : `<mark>${esc(b[o[1]])}</mark>`;
+  });
+  return [ha, hb];
+}
+function sideBySide(ta, tb) {                  // rows of [left html, left class, right html, right class]
+  const a = ta.split("\n"), b = tb.split("\n"), ops = diffOps(a, b, (p, q) => p.trim() === q.trim()), rows = [];
+  for (let k = 0; k < ops.length;) {
+    if (ops[k][0] === "=") { rows.push([esc(a[ops[k][1]]), "", esc(b[ops[k][2]]), ""]); k++; continue; }
+    const del = [], ins = [];
+    while (k < ops.length && ops[k][0] !== "=") { (ops[k][0] === "-" ? del : ins).push(ops[k][1]); k++; }
+    for (let r = 0; r < Math.max(del.length, ins.length); r++) {
+      const x = del[r], y = ins[r];
+      if (x !== undefined && y !== undefined) { const [hx, hy] = markWords(a[x], b[y]); rows.push([hx, "chg", hy, "chg"]); }
+      else if (x !== undefined) rows.push([esc(a[x]), "del", "", "gap"]);
+      else rows.push(["", "gap", esc(b[y]), "add"]);
+    }
+  }
+  return rows;
+}
+async function openQuery(id) {
+  qOpen = id;
+  document.getElementById("qmodal").hidden = false;
+  await loadQuery();
+  clearInterval(qTimer);
+  qTimer = setInterval(loadQuery, 10000);
+}
+function closeQuery() {
+  qOpen = null; QD = null;
+  clearInterval(qTimer);
+  document.getElementById("qmodal").hidden = true;
+}
+async function loadQuery() {
+  if (!qOpen) return;
+  const r = await fetch("api/query?id=" + encodeURIComponent(qOpen));
+  if (!r.ok) return;
+  const first = !QD || QD.id !== qOpen;
+  QD = await r.json();
+  if (first) renderQueryBox(); else { renderQueryStats(); drawQueryChart(); }
+}
+function renderQueryBox() {
+  const d = QD, T = d.targets, box = document.getElementById("qbox");
+  const panes = T.map((lbl, i) => ({lbl, i, ...d.sql[lbl]}));
+  let sqlHtml;
+  const pane = (p, body) => `<div class="sqlpane" style="--tc:${TC(p.i)}"><div class="hd">${esc(p.lbl)} <span>· ${esc(p.engine)} engine, [sql].${esc(p.dialect || "–")}</span></div><pre>${body}</pre></div>`;
+  const lines = t => t.split("\n").map(l => `<span class="ln">${esc(l)}</span>`).join("");
+  const have = panes.filter(p => p.text !== null);
+  if (d.same_sql && have.length) {
+    sqlHtml = `<h4>SQL · the same text runs on ${have.map(p => esc(p.lbl)).join(" and ")} (parameters in braces are drawn for every run)</h4>
+      <div class="sqlgrid">${pane({...have[0], lbl: have.map(p => p.lbl).join(" = "), engine: have.map(p => p.engine).join(" / ")}, lines(have[0].text))}</div>`;
+  } else {
+    // every other target against the first; the first pane shows its side of the first comparison
+    const base = panes[0], cols = panes.map(p => p.text === null ? null : lines(p.text));
+    if (base.text !== null) panes.slice(1).forEach((p, k) => {
+      if (p.text === null) return;
+      const rows = sideBySide(base.text, p.text);
+      if (k === 0) cols[0] = rows.map(r => `<span class="ln ${r[1]}">${r[0]}</span>`).join("");
+      cols[k + 1] = rows.map(r => `<span class="ln ${r[3]}">${r[2]}</span>`).join("");
+    });
+    sqlHtml = `<h4>SQL per engine · differences highlighted (parameters in braces are drawn for every run)</h4>
+      <div class="sqlgrid" style="grid-template-columns:repeat(${panes.length}, minmax(0, 1fr))">` +
+      panes.map((p, k) => pane(p, p.text === null ? `<span class="ln">-- not supported by ${esc(p.engine)}</span>` : cols[k])).join("") +
+      `</div>`;
+  }
+  box.innerHTML = `<button class="x" title="Close (Esc)" onclick="closeQuery()">×</button>
+    <h3><span class="qid">${d.id}</span>${esc(d.name)}</h3>
+    <div class="meta">complexity ${d.complexity} · tables ${esc(d.tables.join(", "))} · weight serial ${d.weight.serial} / concurrent ${d.weight.concurrent}</div>
+    <p class="desc">${esc(d.description).replace(/\n/g, " ")}</p>
+    ${sqlHtml}
+    <h4>Execution time · last ${d.keep_hours} h · every execution on every target</h4>
+    <div class="qstats" id="qstats"></div><svg id="qsvg"></svg>`;
+  renderQueryStats();
+  drawQueryChart();
+}
+function renderQueryStats() {
+  const d = QD, T = d.targets, el = document.getElementById("qstats");
+  if (!el) return;
+  el.innerHTML = T.map((lbl, i) => {
+    const ex = d.executions.filter(p => p.target === lbl), ok = ex.filter(p => p.status === "ok").map(p => p.s);
+    const err = ex.filter(p => p.status === "error").length, tmo = ex.filter(p => p.status === "timeout").length;
+    return `<span><i style="display:inline-block;width:.8em;height:.8em;border-radius:50%;background:${TC(i)};vertical-align:middle;margin-right:.35em"></i>${esc(lbl)}: ` +
+      `<b>${ex.length}</b> runs · avg <b>${fmtT(ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : null)}</b> · geomean <b>${fmtT(geo(ok))}</b>` +
+      `${err ? ` · <span class="crit">${err} errors</span>` : ""}${tmo ? ` · <span class="warn">${tmo} timeouts</span>` : ""}</span>`;
+  }).join("") + (T.length > 1 && d.speedup[T[1]] ? `<span>${esc(T[1])} is <b>${xFaster(d.speedup[T[1]])}</b>${d.speedup[T[1]] >= 1 ? " faster" : ""} (paired rounds since start)</span>` : "") +
+  `<span class="dim">log scale · ● ok · ▲ timeout (at ${d.timeout}s) · ✕ error (at the bottom)</span>`;
+}
+function drawQueryChart() {
+  const d = QD, svg = document.getElementById("qsvg");
+  if (!svg) return;
+  const T = d.targets, W = svg.clientWidth, H = svg.clientHeight;
+  const rem = parseFloat(getComputedStyle(svg).fontSize);
+  const L = 4.6 * rem, R = 1 * rem, TOP = 0.6 * rem, B = 1.6 * rem;
+  const now = d.now, span = d.keep_hours * 3600, x0 = now - span;
+  const vals = d.executions.filter(p => p.status === "ok" && p.s > 0).map(p => p.s).concat(d.executions.some(p => p.status === "timeout") ? [d.timeout] : []);
+  let lo = vals.length ? Math.min(...vals) : 0.01, hi = vals.length ? Math.max(...vals) : 10;
+  lo = Math.pow(10, Math.floor(Math.log10(lo * 0.9))); hi = Math.pow(10, Math.ceil(Math.log10(hi * 1.1)));
+  if (hi / lo < 100) hi = lo * 100;
+  const X = t => L + (t - x0) / span * (W - L - R);
+  const Y = v => TOP + (1 - (Math.log10(v) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * (H - TOP - B - 0.8 * rem);
+  const yErr = H - B - 0.3 * rem;
+  let h = "";
+  for (let dd = lo; dd <= hi * 1.001; dd *= 10) [1, 2, 5].forEach(m => { const v = dd * m; if (v > hi * 1.001) return;
+    h += `<line class="gl" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" ${m === 1 ? "" : 'stroke-dasharray="2 4"'}/>`;
+    if (m === 1 || hi / lo <= 1000) h += `<text class="ax" x="${L - 0.4 * rem}" y="${Y(v) + 0.3 * rem}" text-anchor="end">${fmtT(v)}</text>`; });
+  const hour = 3600, step = span > 12 * hour ? 2 * hour : hour;
+  for (let t = Math.ceil(x0 / hour) * hour; t <= now; t += hour) {
+    const dt = new Date(t * 1000);
+    if ((dt.getHours() * hour) % step) continue;
+    h += `<line class="gl" x1="${X(t)}" x2="${X(t)}" y1="${TOP}" y2="${H - B}"/><text class="ax" x="${X(t)}" y="${H - 0.3 * rem}" text-anchor="middle">${String(dt.getHours()).padStart(2, "0")}:00</text>`;
+  }
+  T.forEach((lbl, i) => {
+    const c = TC(i), ex = d.executions.filter(p => p.target === lbl && p.t >= x0);
+    const ok = ex.filter(p => p.status === "ok" && p.s > 0);
+    let path = "";
+    ok.forEach((p, k) => { path += `${k && p.t - ok[k - 1].t < 1800 ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p.s).toFixed(1)}`; });
+    h += `<path d="${path}" fill="none" stroke="${c}" stroke-width="1.5" opacity=".55"/>`;
+    ex.forEach(p => {
+      const x = X(p.t).toFixed(1), tip = `<title>${esc(lbl)} · ${clock(p.t)} · ${p.status}${p.s != null ? " · " + fmtT(p.s) : ""}</title>`;
+      if (p.status === "ok" && p.s > 0) h += `<circle cx="${x}" cy="${Y(p.s).toFixed(1)}" r="3.2" fill="${c}">${tip}</circle>`;
+      else if (p.status === "timeout") { const y = Y(d.timeout); h += `<path d="M${x},${y - 5}L${+x + 5},${y + 4}L${x - 5},${y + 4}Z" fill="${c}" stroke="var(--warning)">${tip}</path>`; }
+      else if (p.status === "error") h += `<text x="${x}" y="${yErr}" text-anchor="middle" fill="${c}" font-weight="700">✕${tip}</text>`;
+    });
+  });
+  if (!d.executions.length) h += `<text class="ax" x="${W / 2}" y="${H / 2}" text-anchor="middle">No executions of ${d.id} recorded yet.</text>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = h;
+}
+document.getElementById("perq").addEventListener("click", ev => { const r = ev.target.closest("[data-q]"); if (r) openQuery(r.dataset.q); });
+document.getElementById("recent").addEventListener("click", ev => { const r = ev.target.closest(".qlink"); if (r) openQuery(r.dataset.q); });
+document.getElementById("qmodal").addEventListener("click", ev => { if (ev.target.id === "qmodal") closeQuery(); });
+document.addEventListener("keydown", ev => { if (ev.key === "Escape" && qOpen) closeQuery(); });
 
 async function poll() {
   try {
