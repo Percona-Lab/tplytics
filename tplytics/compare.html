@@ -30,7 +30,7 @@
 }
 /* Sized for a big screen: everything scales with the viewport, so a 16:9
    screen (1080p up to 4K) shows the whole board without scrolling. */
-html { font-size: clamp(7px, min(0.74vw, 1.12vh), 32px); }
+html { font-size: clamp(10px, min(0.74vw, 1.12vh), 32px); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text-primary);
        font: 1rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -173,9 +173,10 @@ tr.errrow .who { font-weight: 700; font-size: 0.85rem; margin: 0.2rem 0; }
          font-size: 0.85rem; padding: 0.35rem 0.6rem; border-radius: 0.4rem; white-space: nowrap; display: none; z-index: 5;
          font-variant-numeric: tabular-nums; line-height: 1.45; }
 .ltempty { position: absolute; left: 0; right: 0; top: 55%; text-align: center; color: var(--muted); }
-/* Stack only on small screens (phones, narrow windows); scaled big screens of
-   1000+ CSS pixels keep the board and just get smaller type. */
-@media (max-width: 900px) {
+/* Below 1300 CSS pixels the board stacks (main area, then the verdict and
+   per-query table) at a readable fixed size; the primary panel keeps its two
+   lines of two graphs, with its label above them. */
+@media (max-width: 1300px) {
   html { font-size: 13px; }
   .board { grid-template-columns: minmax(0, 1fr); }
   .primary-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
