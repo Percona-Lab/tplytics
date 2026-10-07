@@ -66,7 +66,11 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .thead { flex-wrap: nowrap; }
 .thead .sub { color: var(--text-secondary); font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; }
-.kpi { padding: 0.7rem 1rem; min-width: 0; }
+.kpi { padding: 0.7rem 1rem; min-width: 0; position: relative; overflow: hidden; }
+.kpi > :not(.bgspark) { position: relative; z-index: 1; }
+.kpi .bgspark { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 62%; pointer-events: none; }
+.kpi .bgspark path.area { opacity: .16; }
+.kpi .bgspark path.line { opacity: .55; }
 .kpi .k, .load .k { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .kpi .v { font-size: 3rem; font-weight: 800; line-height: 1.1; margin-top: 0.15rem; }
 .kpi .v small { font-size: 1.3rem; font-weight: 600; color: var(--text-secondary); margin-left: 0.2rem; }
@@ -131,6 +135,12 @@ table.t td.qn, table.t td.ql { overflow: hidden; text-overflow: ellipsis; }
 table.t tr.now td { background: var(--surface-2); }
 .sbar { display: inline-block; height: 0.55rem; border-radius: 99px; vertical-align: middle; margin-left: 0.4rem; }
 tr.fresh { animation: slidein .6s ease-out; }
+.errlink { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 0.2em; }
+.errlink:hover { filter: brightness(1.25); }
+tr.errrow td { border-top: 0; padding-top: 0; white-space: normal; }
+tr.errrow pre.err { margin: 0 0 0.4rem; max-height: 7rem; overflow: auto; background: var(--code);
+                    border: 1px solid var(--line); border-radius: 0.4rem; padding: 0.4rem 0.6rem; }
+tr.errrow .who { font-weight: 700; font-size: 0.85rem; margin: 0.2rem 0; }
 @keyframes slidein { from { opacity: 0; transform: translateY(-0.4rem); } to { opacity: 1; } }
 .empty { color: var(--muted); padding: 1rem; }
 @media (max-width: 1300px) {
@@ -167,7 +177,7 @@ tr.fresh { animation: slidein .6s ease-out; }
 </div>
 
 <script>
-let S = null, built = 0, roundKey = null, shownSeqs = "";
+let S = null, built = 0, roundKey = null, shownSeqs = "", openErr = new Set();
 const TC = i => `var(--t${i % 4})`;
 const ICON = {ok: "✓", error: "✕", timeout: "⏱", unsupported: "–"};
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
@@ -245,7 +255,8 @@ function build() {
   document.getElementById("cols").innerHTML = S.targets.map((t, i) => `<div class="tcol" style="--tc:${TC(i)}">
       <div class="card thead"><span class="name">${esc(t.label)}</span><span class="sub" id="tsub${i}"></span></div>
       <div class="kpis">
-        <div class="card kpi"><div class="k">Replication lag</div><div class="v num" id="lag${i}">–</div><div class="s" id="lags${i}"></div></div>
+        <div class="card kpi"><svg class="bgspark" id="lagsp${i}" viewBox="0 0 300 50" preserveAspectRatio="none"></svg>
+          <div class="k">Replication lag</div><div class="v num" id="lag${i}">–</div><div class="s" id="lags${i}"></div></div>
         <div class="card kpi"><div class="k">Geomean so far</div><div class="v num" id="geo${i}">–</div><div class="s" id="geos${i}"></div></div>
         <div class="card kpi"><div class="k">Executions</div><div class="v num" id="exe${i}">–</div><div class="s" id="exes${i}"></div></div>
       </div>
@@ -295,10 +306,13 @@ function render() {
     const [lv, lu] = fmtLag(t.lag), lagEl = document.getElementById("lag" + i);
     lagEl.className = "v num " + lagClass(t.lag);
     lagEl.innerHTML = t.lag === null || t.lag === undefined ? "–" : `${lv}<small>${lu}</small>`;
-    const ls = t.lag_stats && t.lag_stats["5m"];
+    const hist = (t.lag_series || []).filter(p => p.lag !== null && p.lag !== undefined);
+    const hmax = hist.length ? Math.max(...hist.map(p => p.lag)) : null;
     document.getElementById("lags" + i).textContent = t.lag_state === "ok"
-      ? (ls ? `heartbeat · 5 min max ${fmtLag(ls.max).join(" ")}` : "heartbeat")
+      ? (hmax !== null ? `heartbeat · 15 min max ${fmtLag(hmax).join(" ")}` : "heartbeat")
       : (t.lag_state || "") + (t.lag_error ? ": " + t.lag_error.slice(0, 60) : "");
+    const lc = {good: "var(--good)", warn: "var(--warning)", crit: "var(--critical)"}[lagClass(t.lag)] || "var(--muted)";
+    document.getElementById("lagsp" + i).innerHTML = spark(t.lag_series || [], [{f: "lag", c: lc}]);
     const o = S.overall[t.label] || {}, [gv, gu] = fmtTparts(o.geomean);
     document.getElementById("geo" + i).innerHTML = o.geomean ? `${gv}<small>${gu}</small>` : "–";
     document.getElementById("geos" + i).textContent = o.ok ? `${o.ok} successful executions · avg ${fmtT(o.avg)}` : "no successful execution yet";
@@ -389,12 +403,25 @@ function renderRecent() {
     T.length > 1 ? `<th class="n">Ratio</th>` : ""}</tr>`;
   hist.forEach(e => {
     h += `<tr class="${fresh.has(e.seq) && shownSeqs ? "fresh" : ""}"><td class="n dim">${e.seq}</td><td class="num dim">${clock(e.finished)}</td><td class="ql"><b>${e.id}</b> ${esc(e.name)}</td>`;
-    T.forEach(t => { const r = e.results[t.label]; h += `<td class="n">${r.status === "ok" ? fmtT(r.elapsed) : `<span class="status ${r.status}">${ICON[r.status] || ""} ${r.status}</span>`}</td>`; });
+    T.forEach(t => {
+      const r = e.results[t.label];
+      h += `<td class="n">${r.status === "ok" ? fmtT(r.elapsed) : r.error
+        ? `<span class="status ${r.status} errlink" data-seq="${e.seq}" title="Show the error">${ICON[r.status] || ""} ${r.status}</span>`
+        : `<span class="status ${r.status}">${ICON[r.status] || ""} ${r.status}</span>`}</td>`;
+    });
     if (T.length > 1) { const sp = e.results[T[1].label].speedup; h += `<td class="n">${sp ? xFaster(sp) : "–"}</td>`; }
     h += "</tr>";
+    const failed = T.filter(t => e.results[t.label].status !== "ok" && e.results[t.label].error);
+    if (failed.length) {
+      h += `<tr class="errrow" data-seq="${e.seq}" ${openErr.has(e.seq) ? "" : "hidden"}><td colspan="${3 + T.length + (T.length > 1 ? 1 : 0)}">${
+        failed.map(t => { const i = T.indexOf(t); return `<div class="who" style="color:${TC(i)}">${esc(t.label)} · ${e.id} · ${e.results[t.label].status}</div>
+          <pre class="err">${esc(e.results[t.label].error)}</pre>`; }).join("")}</td></tr>`;
+    }
   });
   document.getElementById("recent").innerHTML = hist.length ? h + "</table>" : `<div class="empty">Finished rounds appear here, newest first.</div>`;
   shownSeqs = seqs;
+  const kept = new Set(hist.map(x => x.seq));
+  [...openErr].forEach(s => kept.has(s) || openErr.delete(s));
 }
 
 async function poll() {
@@ -407,6 +434,14 @@ async function poll() {
   }
   setTimeout(poll, 1000);
 }
+document.getElementById("recent").addEventListener("click", ev => {
+  const link = ev.target.closest(".errlink");
+  if (!link) return;
+  const seq = Number(link.dataset.seq), row = document.querySelector(`#recent tr.errrow[data-seq="${seq}"]`);
+  if (!row) return;
+  row.hidden = !row.hidden;
+  row.hidden ? openErr.delete(seq) : openErr.add(seq);
+});
 document.getElementById("toggle").onclick = async () => {
   await fetch(S && S.running ? "api/pause" : "api/resume", {method: "POST"});
 };

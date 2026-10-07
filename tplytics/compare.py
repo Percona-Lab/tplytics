@@ -57,6 +57,8 @@ from .runner import OK, TIMEOUT, Runner
 from .state import DatabaseState, StateRefresher, human_duration
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare.html")
+LAG_STEP = 5.0               # seconds between points of the lag history
+LAG_POINTS = 180             # 15 minutes
 CONN_KEYS = ("engine", "host", "port", "socket", "user", "password", "database", "schema",
              "defaults_file", "init_sql")
 TARGET_KEYS = CONN_KEYS + ("label", "status_url", "heartbeat_table", "heartbeat_id")
@@ -189,7 +191,13 @@ class Target:
         self.refresher = StateRefresher(self.engine, self.state, refresh) if refresh > 0 else None
         self.status = {"lag": None, "lag_state": "starting", "series": [], "system_stats": False,
                        "host": None, "cpus": None}
+        self.lag_series = collections.deque(maxlen=LAG_POINTS)
         self.lock = threading.Lock()
+
+    def add_lag(self, t, lag):
+        """One lag point every LAG_STEP seconds: the history behind the big number."""
+        if not self.lag_series or t - self.lag_series[-1]["t"] >= LAG_STEP:
+            self.lag_series.append({"t": round(t, 1), "lag": lag})
 
     def describe(self):
         return self.engine.describe()
@@ -249,6 +257,7 @@ class StatusPoller(threading.Thread):
             upd = self.poll_url() if self.t.opts.status_url else self.poll_table()
             with self.t.lock:
                 self.t.status.update(upd)
+                self.t.add_lag(t, upd.get("lag"))
             time.sleep(max(0.1, (self.interval if self.t.opts.status_url else 2.0) - (time.time() - t)))
 
 
@@ -401,6 +410,7 @@ def make_handler(loop, targets, local, primary, args):
         for t in targets:
             with t.lock:
                 st = dict(t.status)
+                st["lag_series"] = list(t.lag_series)
             d["targets"].append({
                 "label": t.label, "engine": t.engine.name, "server_version": t.server_version,
                 "target": t.describe(), "status_url": t.opts.status_url,
