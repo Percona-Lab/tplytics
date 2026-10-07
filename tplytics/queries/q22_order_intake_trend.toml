@@ -58,3 +58,23 @@ FROM  (SELECT to_timestamp(FLOOR(EXTRACT(EPOCH FROM o_entry_d) / {win_bucket}) *
        GROUP  BY 1) b
 ORDER  BY period_start
 """
+duckdb = """
+SELECT period_start,
+       orders,
+       order_lines,
+       ROUND(1.0 * order_lines / orders, 2)                     AS lines_per_order,
+       ROUND(100.0 * remote_orders / orders, 2)                 AS pct_remote_orders,
+       ROUND(100.0 * delivered_orders / orders, 2)              AS pct_delivered,
+       active_warehouses,
+       SUM(orders) OVER (ORDER BY period_start)                 AS running_orders
+FROM  (SELECT time_bucket(to_seconds({win_bucket}), o_entry_d, TIMESTAMP '1970-01-01') AS period_start,
+              COUNT(*)                                                      AS orders,
+              SUM(o_ol_cnt)                                                 AS order_lines,
+              SUM(CASE WHEN o_all_local = 0 THEN 1 ELSE 0 END)              AS remote_orders,
+              SUM(CASE WHEN o_carrier_id IS NOT NULL THEN 1 ELSE 0 END)     AS delivered_orders,
+              COUNT(DISTINCT o_w_id)                                        AS active_warehouses
+       FROM   orders
+       WHERE  o_entry_d >= {win_start} AND o_entry_d < {win_end}
+       GROUP  BY 1) b
+ORDER  BY period_start
+"""

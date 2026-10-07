@@ -35,7 +35,7 @@ git clone https://github.com/Percona-Lab/tplytics.git
 cd tplytics
 pip install -r requirements.txt      # PyMySQL, psycopg 3 (Python 3.8+; tomli on < 3.11)
 
-./tplytics.py list                                         # the 20 queries and their weights
+./tplytics.py list                                         # the 22 queries and their weights
 ./tplytics.py info  --engine mysql --host db1 --user root -p secret
 ./tplytics.py demo  --engine mysql --host db1 --user root -p secret
 ./tplytics.py serial --engine postgresql --host db1 --user tpcc -p tpcc --json serial.json
@@ -329,7 +329,7 @@ server, fed from its binlog, and its daemon can serve that copy on a MySQL
 protocol port (turn it on in the web interface under **Connect a SQL client**;
 the Docker Compose stack publishes it on `127.0.0.1:3309`). Statements on that
 port run in DuckDB, so `--engine dbtrail` tries `[sql].dbtrail`, then
-`[sql].duckdb`, then the MySQL text. Q05, Q08 and Q10 have DuckDB variants
+`[sql].duckdb`, then the MySQL text. Q05, Q08, Q10 and Q22 have DuckDB variants
 (`time_bucket` instead of `FROM_UNIXTIME(UNIX_TIMESTAMP())`, `date_diff`
 instead of `TIMESTAMPDIFF`); the other queries run unchanged.
 
