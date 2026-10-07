@@ -558,7 +558,7 @@ function drawLongTerm() {
     const ratio = geo(both.map(p => p.targets[T[0].label].geomean / p.targets[T[1].label].geomean));
     if (ratio) leg += `<span>${esc(T[1].label)} is <b>${xFaster(ratio)}</b>${ratio >= 1 ? " faster" : ""} over ${both.length} passes</span>`;
   }
-  document.getElementById("ltleg").innerHTML = leg + `<span class="dim">log scale · timeouts count as ${S.timeout}s</span>`;
+  document.getElementById("ltleg").innerHTML = leg + `<span class="dim">log scale · ● every query ok · ▲ pass with timeouts (counted as ${S.timeout}s) · ✕ pass with errors (left out of its geomean)</span>`;
   /* scales: time on x, log10 of seconds on y */
   const vals = series.flat().map(v => v[1]);
   let lo = vals.length ? Math.min(...vals) : 0.1, hi = vals.length ? Math.max(...vals) : 10;
@@ -583,7 +583,14 @@ function drawLongTerm() {
     let d = "";
     s.forEach(([t, v], k) => { d += `${k && t - s[k - 1][0] < 1800 ? "L" : "M"}${X(t).toFixed(1)},${Y(v).toFixed(1)}`; });
     h += `<path class="ln" style="stroke:${TC(i)}" d="${d}"/>`;
-    if (s.length < 60) s.forEach(([t, v]) => { h += `<circle cx="${X(t).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="2.5" fill="${TC(i)}"/>`; });
+    // A pass with errors or timeouts gets its own symbol (always drawn): its
+    // geomean leaves out the errors and counts timeouts at the timeout.
+    s.forEach(([t, v, p]) => {
+      const x = X(t), y = Y(v), c = TC(i), st = p.targets[T[i].label], r = 0.32 * rem;
+      if (st.errors) h += `<path d="M${x - r},${y - r}L${x + r},${y + r}M${x - r},${y + r}L${x + r},${y - r}" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/>`;
+      else if (st.timeouts) h += `<path d="M${x},${y - r * 1.2}L${x + r * 1.1},${y + r * 0.8}L${x - r * 1.1},${y + r * 0.8}Z" fill="var(--surface-1)" stroke="${c}" stroke-width="1.8"/>`;
+      else if (s.length < 60) h += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="${c}"/>`;
+    });
   });
   if (ltHover !== null && pts[ltHover]) {
     const p = pts[ltHover];
