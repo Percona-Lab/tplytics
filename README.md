@@ -132,24 +132,41 @@ cancelled and left out of the results.
 
 ### dashboard (live demo in the browser)
 
-The dashboard runs the queries one after another in an endless loop, like demo
-mode, and serves a web page that shows every query with the execution time and
-row count of its last run, its average, and how many runs it has had. The query
-currently running is marked and its timer counts up live. Click a query to see
-its description, tables and weights, the parameters and SQL of its last
-execution, its first 5 result rows, any error, and its min/avg/max statistics.
-**Pause** stops the loop after the current query, and **Resume** continues it.
+The dashboard runs one query at a time in an endless loop, like demo mode, and
+serves a live web page:
+
+* **System load** at the top: CPU busy and I/O wait, disk throughput (read and
+  write MB/s), disk IOPS and database transactions/s. Each tile has a sparkline
+  of the last 3 minutes, with a hover tooltip. CPU and disk come from `/proc`
+  of the machine the dashboard runs on, so run it on the database host to see
+  them. Transactions/s comes from the engine (`Com_commit + Com_rollback` on
+  MySQL, `pg_stat_database` on PostgreSQL) and includes HammerDB.
+* **Current query**: the query's description, tables and parameters, and its
+  state. While it is **running**, the page shows the SQL and a live timer. Once
+  it finishes it shows **waiting**, with its response time, rows, status, the
+  first 5 rows (or the error) and a countdown to the next query.
+* **Recent queries** at the bottom: the last `--history` (10) finished queries,
+  newest first. When a new query starts, the finished one slides in at the top
+  and the oldest drops off the bottom. Click a row for its description,
+  parameters, result rows and SQL.
+
+At most one query starts every `--interval` seconds (5 by default), and every
+result stays the current query for at least `--min-display` seconds, so people
+have time to read it. **Pause** stops the loop after the current query, and
+**Resume** continues it. `--order weighted` picks queries at random by their
+concurrent weight instead of going through Q01..Q20 in turn.
 
 ```
 ./tplytics.py dashboard --defaults-file ~/.my.cnf                         # http://127.0.0.1:8080/
-./tplytics.py dashboard --listen 0.0.0.0 --http-port 8080 --delay 2 --timeout 120
+./tplytics.py dashboard --listen 0.0.0.0 --http-port 8080 --interval 8 --timeout 120
 ```
 
 The page only shows what the query files and the engine layer provide. Adding
-a query or an engine variant (see below) needs no change to the dashboard. The
-dashboard has no authentication. It listens on 127.0.0.1 unless you pass
-`--listen`, so put it behind a firewall or an SSH tunnel when the database is
-not a test system.
+a query or an engine variant (see below) needs no change to the dashboard.
+Engines can supply a transactions counter by setting `activity_sql` in
+`engines.py`. The dashboard has no authentication. It listens on 127.0.0.1
+unless you pass `--listen`, so put it behind a firewall or an SSH tunnel when
+the database is not a test system.
 
 ### Other commands
 

@@ -130,7 +130,15 @@ def build_parser():
     p.add_argument("--listen", default="127.0.0.1",
                    help="address to listen on (default 127.0.0.1; 0.0.0.0 for all interfaces)")
     p.add_argument("--http-port", type=int, default=8080, help="HTTP port of the dashboard (default 8080)")
-    p.add_argument("--delay", type=float, default=1.0, help="pause between queries in seconds (default 1)")
+    p.add_argument("--interval", type=float, default=5.0,
+                   help="minimum seconds between two query starts, so results can be read (default 5)")
+    p.add_argument("--min-display", type=float, default=2.0,
+                   help="minimum seconds a finished query stays the current query (default 2)")
+    p.add_argument("--order", choices=["sequential", "weighted"], default="sequential",
+                   help="sequential: Q01..Q20 in turn; weighted: random by concurrent weight")
+    p.add_argument("--history", type=int, default=10, help="finished queries listed at the bottom (default 10)")
+    p.add_argument("--system-stats", choices=["auto", "off"], default="auto",
+                   help="CPU and disk charts from /proc of this host (auto: on Linux)")
     p.add_argument("--show-rows", type=int, default=5, help="result rows kept per query (default 5)")
     p.add_argument("--start-paused", action="store_true", help="wait for Resume in the browser")
     p.add_argument("--refresh", type=float, default=60,

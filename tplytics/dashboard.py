@@ -1,13 +1,20 @@
-"""Live demo dashboard: runs the queries in a loop and shows them in a browser.
+"""Live demo dashboard: runs the queries one at a time and shows them in a browser.
+
+Top of the page: system load (CPU, disk I/O) and database transactions/s.
+Middle: the current query, either "running" or "waiting" (finished; the
+result stays on screen until the next query starts). Bottom: the last N
+finished queries, newest first.
 
 The dashboard has no query knowledge of its own. Everything it shows (name,
 description, SQL, parameters, engine support) comes from the query files and
 the engine layer, exactly as in demo mode, so adding an engine or a query
 needs no change here.
 """
+import collections
 import json
 import os
 import random
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,100 +26,201 @@ from .runner import Runner, OK
 from .state import StateRefresher
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+SERIES_POINTS = 180          # 3 minutes of 1-second samples
 
 
-class QueryBoard:
-    """Latest result and running statistics of one query."""
-
-    def __init__(self, q, supported):
-        self.q = q
-        self.supported = supported
-        self.last = None
-        self.runs = self.ok = self.errors = self.timeouts = 0
-        self.total = 0.0
-        self.min = self.max = None
-
-    def record(self, r, sql, values):
-        self.runs += 1
-        if r.status == OK:
-            self.ok += 1
-            self.total += r.elapsed
-            self.min = r.elapsed if self.min is None else min(self.min, r.elapsed)
-            self.max = r.elapsed if self.max is None else max(self.max, r.elapsed)
-        elif r.status == "timeout":
-            self.timeouts += 1
-        else:
-            self.errors += 1
-        self.last = {
-            "status": r.status, "elapsed": r.elapsed, "rows": r.rows, "error": r.error,
-            "finished": time.time(), "sql": sql, "params": P.describe(values or {}),
-            "columns": r.columns or [],
-            "data": [[fmt_value(v) for v in row] for row in (r.data or [])],
-        }
-
-    def as_dict(self):
-        q = self.q
-        return {
-            "id": q.id, "name": q.name, "complexity": q.complexity, "tables": q.tables,
-            "description": q.description, "weight": q.weight, "supported": self.supported,
-            "runs": self.runs, "ok": self.ok, "errors": self.errors, "timeouts": self.timeouts,
-            "avg": self.total / self.ok if self.ok else None, "min": self.min, "max": self.max,
-            "last": self.last,
-        }
+# ================================================================ system load
+def _read_cpu():
+    with open("/proc/stat") as fh:
+        f = [int(x) for x in fh.readline().split()[1:]]
+    user, nice, system, idle, iowait, irq, softirq, steal = (f + [0] * 8)[:8]
+    return {"user": user + nice, "system": system + irq + softirq, "iowait": iowait,
+            "steal": steal, "idle": idle}
 
 
+def _disks():
+    names = []
+    for d in sorted(os.listdir("/sys/block")):
+        if d.startswith(("loop", "ram", "zram", "dm-", "sr", "fd")):
+            continue
+        names.append(d)
+    return set(names)
+
+
+def _read_disk(disks):
+    rd = wr = rio = wio = 0
+    with open("/proc/diskstats") as fh:
+        for line in fh:
+            p = line.split()
+            if len(p) >= 10 and p[2] in disks:
+                rio += int(p[3]); rd += int(p[5]); wio += int(p[7]); wr += int(p[9])
+    return {"read_bytes": rd * 512, "write_bytes": wr * 512, "read_ios": rio, "write_ios": wio}
+
+
+class Sampler(threading.Thread):
+    """Samples CPU, disk and database activity once a second."""
+
+    def __init__(self, engine, system_stats):
+        super().__init__(daemon=True, name="sampler")
+        self.engine = engine
+        self.system = system_stats and os.path.exists("/proc/stat") and os.path.isdir("/sys/block")
+        self.disks = _disks() if self.system else set()
+        self.series = collections.deque(maxlen=SERIES_POINTS)
+        self.lock = threading.Lock()
+        self.db_enabled = engine.activity_sql is not None
+
+    def run(self):
+        session = None
+        prev = None
+        while True:
+            t = time.time()
+            cur = {"t": t}
+            if self.system:
+                try:
+                    cur["cpu"] = _read_cpu()
+                    cur["disk"] = _read_disk(self.disks)
+                except OSError:
+                    self.system = False
+            if self.db_enabled:
+                try:
+                    if session is None:
+                        session = self.engine.connect()
+                    cur["tx"] = self.engine.activity_counter(session)
+                except Exception:  # noqa: BLE001 - counters are best effort
+                    if session is not None:
+                        session.close()
+                    session = None
+            if prev is not None:
+                self._add_point(prev, cur)
+            prev = cur
+            time.sleep(max(0.05, 1.0 - (time.time() - t)))
+
+    def _add_point(self, a, b):
+        dt = max(0.001, b["t"] - a["t"])
+        pt = {"t": round(b["t"], 1)}
+        if "cpu" in a and "cpu" in b:
+            d = {k: b["cpu"][k] - a["cpu"][k] for k in b["cpu"]}
+            tot = max(1, sum(d.values()))
+            pt["cpu_busy"] = round(100.0 * (tot - d["idle"] - d["iowait"]) / tot, 1)
+            pt["cpu_iowait"] = round(100.0 * d["iowait"] / tot, 1)
+        if "disk" in a and "disk" in b:
+            d = {k: b["disk"][k] - a["disk"][k] for k in b["disk"]}
+            pt["read_mb"] = round(d["read_bytes"] / dt / 1048576, 2)
+            pt["write_mb"] = round(d["write_bytes"] / dt / 1048576, 2)
+            pt["iops"] = round((d["read_ios"] + d["write_ios"]) / dt, 0)
+        if a.get("tx") is not None and b.get("tx") is not None:
+            pt["tps"] = round(max(0.0, b["tx"] - a["tx"]) / dt, 1)
+        with self.lock:
+            self.series.append(pt)
+
+    def snapshot(self):
+        with self.lock:
+            return list(self.series)
+
+
+# ================================================================ query loop
 class Loop(threading.Thread):
-    """Runs every supported query in turn, forever, until paused."""
+    """Runs one query at a time, at most one start every --interval seconds."""
 
     def __init__(self, ctx):
         super().__init__(daemon=True, name="dashboard-loop")
         a = ctx.args
         self.ctx = ctx
-        self.boards = [QueryBoard(q, q.supported(ctx.engine)) for q in ctx.queries]
+        self.queries = [q for q in ctx.queries if q.supported(ctx.engine)]
+        self.unsupported = [q.id for q in ctx.queries if not q.supported(ctx.engine)]
         self.lock = threading.Lock()
         self.running = threading.Event()
         if not a.start_paused:
             self.running.set()
         self.current = None
-        self.cycle = 0
+        self.history = collections.deque(maxlen=a.history)
+        self.next_start = None
+        self.executed = 0
+        self.stats = {q.id: {"runs": 0, "ok": 0, "total": 0.0} for q in self.queries}
         self.rng = random.Random(a.seed)
         self.runner = Runner(ctx.engine, a.timeout, a.init_sql)
 
+    def _pick(self):
+        if self.ctx.args.order == "weighted":
+            return self.rng.choices(self.queries, weights=[q.weight["concurrent"] for q in self.queries])[0]
+        q = self.queries[self.executed % len(self.queries)]
+        return q
+
+    def _wait_until(self, t):
+        while True:
+            self.running.wait()
+            left = t - time.time()
+            if left <= 0:
+                return
+            time.sleep(min(left, 0.2))
+
     def run(self):
-        boards = [b for b in self.boards if b.supported]
-        if not boards:
+        a = self.ctx.args
+        if not self.queries:
             return
         while True:
-            self.cycle += 1
-            for b in boards:
-                self.running.wait()
-                q = b.q
-                try:
-                    values = q.new_params(self.ctx.state, self.rng)
-                    sql = q.render(self.ctx.engine, values)
-                except Exception as e:  # noqa: BLE001
-                    values, sql = {}, "-- could not generate parameters: %s" % e
-                self.current = {"id": q.id, "started": time.time(), "sql": sql}
-                r = self.runner.run(q.id, sql, keep_rows=self.ctx.args.show_rows, params=values)
-                with self.lock:
-                    b.record(r, sql, values)
-                    self.current = None
-                time.sleep(self.ctx.args.delay)
+            if self.next_start:
+                self._wait_until(self.next_start)
+            self.running.wait()
+            q = self._pick()
+            try:
+                values = q.new_params(self.ctx.state, self.rng)
+                sql = q.render(self.ctx.engine, values)
+            except Exception as e:  # noqa: BLE001
+                values, sql = {}, "-- could not generate parameters: %s" % e
+            entry = {
+                "seq": self.executed + 1, "id": q.id, "name": q.name, "complexity": q.complexity,
+                "tables": q.tables, "description": q.description, "weight": q.weight,
+                "params": P.describe(values), "sql": sql, "state": "running",
+                "started": time.time(), "finished": None,
+            }
+            with self.lock:
+                if self.current is not None:
+                    self.history.appendleft(self.current)
+                self.current = entry
+                self.next_start = None
+            started = time.time()
+            r = self.runner.run(q.id, sql, keep_rows=a.show_rows, params=values)
+            with self.lock:
+                self.executed += 1
+                st = self.stats[q.id]
+                st["runs"] += 1
+                if r.status == OK:
+                    st["ok"] += 1
+                    st["total"] += r.elapsed
+                entry.update({
+                    "state": "waiting", "status": r.status, "elapsed": r.elapsed, "rows": r.rows,
+                    "error": r.error, "finished": time.time(), "columns": r.columns or [],
+                    "data": [[fmt_value(v) for v in row] for row in (r.data or [])],
+                    "avg": st["total"] / st["ok"] if st["ok"] else None, "runs": st["runs"],
+                })
+                # at most one query start per interval, and every result stays
+                # visible for at least min_display seconds
+                self.next_start = max(started + a.interval, time.time() + a.min_display)
 
     def snapshot(self):
         with self.lock:
-            st = self.ctx.state
-            return {
-                "version": __version__, "engine": self.ctx.engine.name,
-                "server_version": self.ctx.server_version, "target": self.ctx.engine.describe(),
-                "database": st.summary(), "data_to": st.t_max.strftime("%Y-%m-%d %H:%M:%S"),
-                "running": self.running.is_set(), "cycle": self.cycle, "timeout": self.ctx.args.timeout,
-                "current": self.current, "now": time.time(),
-                "queries": [b.as_dict() for b in self.boards],
-            }
+            return {"current": dict(self.current) if self.current else None,
+                    "history": [dict(h) for h in self.history],
+                    "next_start": self.next_start, "executed": self.executed}
 
 
-def make_handler(loop):
+def make_handler(loop, sampler, ctx):
+    def state():
+        st = ctx.state
+        d = loop.snapshot()
+        d.update({
+            "version": __version__, "engine": ctx.engine.name, "server_version": ctx.server_version,
+            "target": ctx.engine.describe(), "host": socket.gethostname(),
+            "database": st.summary(), "data_to": st.t_max.strftime("%Y-%m-%d %H:%M:%S"),
+            "running": loop.running.is_set(), "timeout": ctx.args.timeout,
+            "interval": ctx.args.interval, "order": ctx.args.order,
+            "unsupported": loop.unsupported, "now": time.time(),
+            "system_stats": sampler.system, "db_stats": sampler.db_enabled,
+            "series": sampler.snapshot(),
+        })
+        return d
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -131,7 +239,7 @@ def make_handler(loop):
                 with open(PAGE, "rb") as fh:
                     self._send(200, fh.read(), "text/html; charset=utf-8")
             elif self.path == "/api/state":
-                self._send(200, json.dumps(loop.snapshot()), "application/json")
+                self._send(200, json.dumps(state()), "application/json")
             else:
                 self._send(404, "not found", "text/plain")
 
@@ -151,14 +259,18 @@ def dashboard(ctx):
     a = ctx.args
     loop = Loop(ctx)
     loop.runner.connect()
+    sampler = Sampler(ctx.engine, a.system_stats == "auto")
+    sampler.start()
     refresher = StateRefresher(ctx.engine, ctx.state, a.refresh) if a.refresh > 0 else None
     if refresher:
         refresher.start()
     loop.start()
-    server = ThreadingHTTPServer((a.listen, a.http_port), make_handler(loop))
+    server = ThreadingHTTPServer((a.listen, a.http_port), make_handler(loop, sampler, ctx))
     host = "localhost" if a.listen in ("0.0.0.0", "") else a.listen
     print("dashboard on http://%s:%d/  (%s; Ctrl+C to stop)" % (host, a.http_port,
           "paused" if a.start_paused else "running"), flush=True)
+    if not sampler.system and a.system_stats == "auto":
+        print("note: /proc not available, CPU and disk charts are hidden", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

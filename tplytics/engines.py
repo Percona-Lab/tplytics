@@ -44,6 +44,17 @@ class Engine:
             return "DATE '%s'" % v.isoformat()
         return "'" + str(v).replace("'", "''") + "'"
 
+    # -- activity ----------------------------------------------------------
+    #: statement returning rows whose last column is a cumulative transaction
+    #: counter; the dashboard shows its rate as "DB transactions/s". None = not shown.
+    activity_sql = None
+
+    def activity_counter(self, session):
+        if not self.activity_sql:
+            return None
+        _, rows = session.execute(self.activity_sql)
+        return sum(float(r[-1] or 0) for r in rows)
+
     # -- connections -----------------------------------------------------
     def connect(self):
         """Return a new Session."""
@@ -145,6 +156,8 @@ class MySQLEngine(Engine):
             args["password"] = o.password
         return args
 
+    activity_sql = "SHOW GLOBAL STATUS WHERE Variable_name IN ('Com_commit', 'Com_rollback')"
+
     def timeout_statement(self, seconds):
         return "SET SESSION max_execution_time = %d" % int(seconds * 1000)
 
@@ -205,6 +218,7 @@ class PostgreSQLEngine(Engine):
     name = "postgresql"
     dialects = ["postgresql", "default"]
     default_port = 5432
+    activity_sql = "SELECT SUM(xact_commit + xact_rollback) FROM pg_stat_database"
 
     def connect(self):
         s = PostgreSQLSession(self)

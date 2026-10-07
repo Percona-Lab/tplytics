@@ -6,178 +6,342 @@
 <title>tplytics live</title>
 <style>
 :root {
-  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e3e6eb;
-  --accent: #2f6fde; --ok: #1f9d55; --err: #d64545; --tmo: #d98a00; --run: #2f6fde;
-  --sel: #eef3fd; --code: #f3f5f8;
+  color-scheme: light;
+  --bg: #f4f5f7; --surface-1: #fcfcfb; --text-primary: #0b0b0b; --text-secondary: #52514e;
+  --muted: #7a7974; --line: #e4e3df; --grid: #eeede9; --sel: #eef3fb; --code: #f3f3f0;
+  --series-1: #2a78d6; --series-2: #eb6834;
+  --good: #1a8a4a; --warning: #b77900; --critical: #d03b3b; --accent: #2a78d6;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #12151b; --panel: #1a1e26; --text: #e6e8ec; --muted: #8b93a3; --line: #2a303b;
-          --accent: #6b9bff; --ok: #3ccf7f; --err: #ff6b6b; --tmo: #ffb547; --run: #6b9bff;
-          --sel: #1f2a3d; --code: #141820; }
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #121211; --surface-1: #1a1a19; --text-primary: #ffffff; --text-secondary: #c3c2b7;
+    --muted: #8d8c85; --line: #2c2c2a; --grid: #252523; --sel: #1d2634; --code: #151514;
+    --series-1: #3987e5; --series-2: #d95926;
+    --good: #3cb371; --warning: #e0a030; --critical: #ef6a6a; --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121211; --surface-1: #1a1a19; --text-primary: #ffffff; --text-secondary: #c3c2b7;
+  --muted: #8d8c85; --line: #2c2c2a; --grid: #252523; --sel: #1d2634; --code: #151514;
+  --series-1: #3987e5; --series-2: #d95926;
+  --good: #3cb371; --warning: #e0a030; --critical: #ef6a6a; --accent: #3987e5;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text);
+body { margin: 0; background: var(--bg); color: var(--text-primary);
        font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
-         padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
-header h1 { font-size: 17px; margin: 0; font-weight: 650; }
-header .meta { color: var(--muted); font-size: 12.5px; flex: 1 1 380px; }
-button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
-         padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.wrap { max-width: 1400px; margin: 0 auto; padding: 0 20px 28px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 16px 0 14px; }
+header h1 { font-size: 18px; margin: 0; font-weight: 700; }
+header .meta { color: var(--text-secondary); font-size: 12.5px; flex: 1 1 420px; }
+button { font: inherit; font-weight: 600; border: 1px solid var(--line); background: var(--surface-1);
+         color: var(--text-primary); padding: 7px 16px; border-radius: 7px; cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.status-pill { font-size: 12px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 16px; padding: 16px 20px; }
-@media (max-width: 980px) { main { grid-template-columns: 1fr; } }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-table { border-collapse: collapse; width: 100%; }
-#list th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em;
-           color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-#list td { padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-#list tr.q { cursor: pointer; }
-#list tr.q:hover { background: var(--sel); }
-#list tr.q.selected { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
-#list tr.q.unsupported { opacity: .5; }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
-.qid { font-weight: 650; }
-.name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
-@media (max-width: 640px) {
-  .name, .opt { display: none; }
-  header, main { padding-left: 16px; padding-right: 16px; }
+.pill { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--text-secondary); }
+.card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 12px; }
+h2.section { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary);
+             margin: 22px 0 8px; font-weight: 650; }
+
+/* ---- stat tiles ---- */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1000px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) {
+  .wrap { padding: 0 16px 24px; } .tiles { gap: 8px; }
+  .tile { padding: 10px 10px 8px; } .tile .value { font-size: 22px; } .tile .sub, .legend { display: none; }
 }
-.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
-.dot.ok { background: var(--ok); } .dot.error { background: var(--err); } .dot.timeout { background: var(--tmo); }
-.dot.running { background: var(--run); animation: pulse 1s infinite; }
-@keyframes pulse { 50% { opacity: .25; } }
-.cx { font-size: 11px; color: var(--muted); }
-#detail { padding: 16px 18px; min-height: 300px; }
-#detail h2 { margin: 0 0 4px; font-size: 18px; }
-#detail .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 12px; }
-#detail h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 18px 0 6px; }
-pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
-      overflow-x: auto; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0; }
-.kv { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
-.kv b { font-variant-numeric: tabular-nums; }
+.tile { padding: 12px 14px 10px; position: relative; min-width: 0; }
+.tile .label { font-size: 12.5px; color: var(--text-secondary); display: flex; justify-content: space-between; gap: 8px; }
+.tile .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 2px 0 2px; }
+.tile .value small { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
+.tile .sub { font-size: 12px; color: var(--text-secondary); min-height: 17px; font-variant-numeric: tabular-nums; }
+.legend { display: inline-flex; gap: 10px; font-size: 11.5px; color: var(--text-secondary); }
+.legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+.spark { display: block; width: 100%; height: 54px; margin-top: 6px; overflow: visible; cursor: crosshair; }
+.spark .grid { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark path.line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.spark path.area { opacity: .12; stroke: none; }
+.spark .cross { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.tip { position: absolute; pointer-events: none; background: var(--text-primary); color: var(--surface-1);
+       font-size: 12px; padding: 5px 8px; border-radius: 6px; white-space: nowrap; display: none; z-index: 5;
+       font-variant-numeric: tabular-nums; }
+
+/* ---- current query ---- */
+#current { padding: 18px 20px; min-height: 220px; }
+.cur-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.cur-head .qid { font-size: 26px; font-weight: 750; }
+.cur-head .qname { font-size: 22px; font-weight: 600; }
+.cur-head .chips { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.state { display: inline-flex; align-items: center; gap: 7px; font-weight: 650; font-size: 13px; padding: 4px 11px;
+         border-radius: 99px; border: 1px solid var(--line); }
+.state .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+.state.running .dot { animation: pulse 1s infinite; }
+.state.waiting .dot { background: var(--muted); }
+@keyframes pulse { 50% { opacity: .2; } }
+.cur-desc { color: var(--text-secondary); margin: 6px 0 0; max-width: 1000px; }
+.cur-grid { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 20px; margin-top: 16px; }
+@media (max-width: 800px) { .cur-grid { grid-template-columns: minmax(0, 1fr); } }
+.bigstat .k { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+.bigstat .v { font-size: 44px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.bigstat .v2 { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.bigstat + .bigstat { margin-top: 12px; }
+.status { display: inline-flex; align-items: center; gap: 5px; font-weight: 650; }
+.status.ok { color: var(--good); } .status.error { color: var(--critical); } .status.timeout { color: var(--warning); }
+.params { font-size: 12.5px; color: var(--text-secondary); margin-top: 10px; word-break: break-word; }
+pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0;
+      overflow-x: auto; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text-primary); }
+pre.err { color: var(--critical); white-space: pre-wrap; }
 .result { overflow-x: auto; }
-.result table { font-size: 12.5px; }
-.result th, .result td { padding: 5px 9px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
-.result th { color: var(--muted); font-weight: 600; }
-.err { color: var(--err); }
-.empty { color: var(--muted); padding: 40px 0; text-align: center; }
+.result table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+.result th, .result td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.result th { color: var(--text-secondary); font-weight: 600; }
+.result td.n { text-align: right; font-variant-numeric: tabular-nums; }
+details summary { cursor: pointer; color: var(--text-secondary); font-size: 12.5px; margin: 12px 0 6px; }
+.subhead { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 6px; }
+
+/* ---- recent queries ---- */
+#history { overflow: hidden; }
+.hrow { border-bottom: 1px solid var(--line); }
+.hrow:last-child { border-bottom: 0; }
+.hmain { display: grid; grid-template-columns: 52px 74px 58px minmax(0, 1fr) 100px 96px 70px 90px;
+         gap: 10px; align-items: center; padding: 9px 16px; cursor: pointer; }
+.hmain:hover, .hrow.open .hmain { background: var(--sel); }
+.hhead { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary);
+         cursor: default; border-bottom: 1px solid var(--line); }
+.hhead:hover { background: none; }
+.c-seq, .c-time { color: var(--text-secondary); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.c-id { font-weight: 700; }
+.c-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c-num { text-align: right; font-variant-numeric: tabular-nums; }
+.c-avg { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+@media (max-width: 760px) {
+  .hmain { grid-template-columns: 50px minmax(0, 1fr) 80px 56px; }
+  .c-seq, .c-time, .c-avg, .c-stat { display: none; }
+}
+.hdetail { padding: 4px 16px 16px; display: none; }
+.hrow.open .hdetail { display: block; }
+.hrow.fresh { animation: slidein .6s ease-out; }
+@keyframes slidein { from { background: var(--sel); transform: translateY(-8px); opacity: 0; } to { opacity: 1; } }
+.empty { color: var(--muted); padding: 22px 16px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>tplytics live</h1>
-  <div class="meta" id="meta">connecting...</div>
-  <span class="status-pill" id="pill">-</span>
-  <button id="toggle" class="primary">Pause</button>
-</header>
-<main>
-  <div class="card">
-    <table id="list">
-      <thead><tr><th></th><th>Query</th><th class="name"></th><th class="num">Last time</th><th class="num">Rows</th>
-        <th class="num opt">Avg</th><th class="num opt">Runs</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-  <div class="card" id="detail"><div class="empty">Click a query to see its description, SQL and results.</div></div>
-</main>
-<script>
-let state = null, selected = null, rendered = {};
+<div class="wrap">
+  <header>
+    <h1>tplytics live</h1>
+    <div class="meta" id="meta">connecting...</div>
+    <span class="pill" id="pill">-</span>
+    <button id="toggle" class="primary">Pause</button>
+  </header>
 
+  <div class="tiles" id="tiles"></div>
+
+  <h2 class="section">Current query</h2>
+  <div class="card" id="current"><div class="empty">Waiting for the first query...</div></div>
+
+  <h2 class="section" id="histTitle">Recent queries</h2>
+  <div class="card" id="history">
+    <div class="hmain hhead"><span class="c-seq">#</span><span class="c-time">Finished</span><span class="c-id">Query</span>
+      <span class="c-name"></span><span class="c-stat">Status</span><span class="c-num">Time</span><span class="c-num">Rows</span>
+      <span class="c-avg">Query avg</span></div>
+    <div id="hlist"><div class="empty">Finished queries appear here, newest first.</div></div>
+  </div>
+</div>
+
+<script>
+let S = null, curKey = null, openSeqs = new Set(), shownSeqs = [];
+
+const ICON = { ok: "✓", error: "✕", timeout: "⏱" };
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function fmtT(s) {
-  if (s === null || s === undefined) return "-";
-  if (s < 1) return (s * 1000).toFixed(1) + " ms";
+  if (s === null || s === undefined) return "–";
+  if (s < 1) return (s * 1000).toFixed(s < 0.01 ? 1 : 0) + " ms";
   if (s < 100) return s.toFixed(2) + " s";
   return s.toFixed(0) + " s";
 }
-function esc(s) { return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function fmtN(v, d) { return v === null || v === undefined ? "–" : Number(v).toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}); }
+function clock(t) { return new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}); }
+function statusHtml(st) { return `<span class="status ${st}">${ICON[st] || "•"} ${st}</span>`; }
+function isNum(v) { return /^-?\d+(\.\d+)?$/.test(v); }
 
-function renderList() {
-  const tb = document.querySelector("#list tbody");
-  const html = state.queries.map(q => {
-    const running = state.current && state.current.id === q.id;
-    const st = running ? "running" : (q.last ? q.last.status : "");
-    let t = q.last ? fmtT(q.last.elapsed) : "-";
-    if (running) t = fmtT(state.now - state.current.started) + "…";
-    const rows = q.last ? (q.last.status === "ok" ? q.last.rows : q.last.status) : "-";
-    const cls = ["q", q.id === selected ? "selected" : "", q.supported ? "" : "unsupported"].join(" ");
-    return `<tr class="${cls}" data-id="${q.id}">
-      <td><span class="dot ${st}"></span></td>
-      <td class="qid">${q.id}</td>
-      <td class="name" title="${esc(q.name)}">${esc(q.name)} <span class="cx">cx${q.complexity}</span></td>
-      <td class="num">${q.supported ? t : "n/a"}</td>
-      <td class="num ${q.last && q.last.status !== "ok" ? "err" : ""}">${q.supported ? rows : "unsupported"}</td>
-      <td class="num opt">${fmtT(q.avg)}</td>
-      <td class="num opt">${q.runs}${q.errors + q.timeouts ? ` <span class="err">(${q.errors + q.timeouts}✕)</span>` : ""}</td></tr>`;
-  }).join("");
-  tb.innerHTML = html;
-  tb.querySelectorAll("tr.q").forEach(tr => tr.onclick = () => { selected = tr.dataset.id; rendered = {}; renderList(); renderDetail(); });
+/* ---------- stat tiles with sparklines (last 3 minutes, 1 s samples) ---------- */
+const TILES = [
+  {key: "cpu", label: "CPU busy", unit: "%", series: [{f: "cpu_busy", name: "busy", color: "--series-1"}], max: 100, dec: 0,
+   sub: p => p.cpu_iowait !== undefined ? `I/O wait ${fmtN(p.cpu_iowait, 0)}%` : "", need: "system"},
+  {key: "disk", label: "Disk throughput", unit: "MB/s", series: [{f: "read_mb", name: "read", color: "--series-1"},
+   {f: "write_mb", name: "write", color: "--series-2"}], dec: 1, need: "system",
+   sub: p => `read ${fmtN(p.read_mb, 1)} · write ${fmtN(p.write_mb, 1)} MB/s`},
+  {key: "iops", label: "Disk IOPS", unit: "", series: [{f: "iops", name: "IOPS", color: "--series-1"}], dec: 0, need: "system",
+   sub: () => "reads + writes, all disks"},
+  {key: "tps", label: "DB transactions/s", unit: "", series: [{f: "tps", name: "tx/s", color: "--series-1"}], dec: 0, need: "db",
+   sub: () => "commits + rollbacks, all sessions"},
+];
+function buildTiles() {
+  const el = document.getElementById("tiles");
+  el.innerHTML = TILES.map(t => `<div class="card tile" id="tile-${t.key}">
+      <div class="label"><span>${t.label}</span>${t.series.length > 1 ? `<span class="legend">${t.series.map(s =>
+        `<span><i style="background:var(${s.color})"></i>${s.name}</span>`).join("")}</span>` : ""}</div>
+      <div class="value">–</div><div class="sub"></div>
+      <svg class="spark" viewBox="0 0 300 54" preserveAspectRatio="none"></svg>
+      <div class="tip"></div></div>`).join("");
+  TILES.forEach(t => {
+    const tile = document.getElementById("tile-" + t.key), svg = tile.querySelector("svg"), tip = tile.querySelector(".tip");
+    svg.addEventListener("mousemove", ev => {
+      const pts = (S && S.series || []).filter(p => p[t.series[0].f] !== undefined);
+      if (pts.length < 2) return;
+      const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * 179 - (180 - pts.length);
+      const i = Math.max(0, Math.min(pts.length - 1, Math.round(x)));
+      t.hover = i;
+      drawTile(t);
+      const p = pts[i];
+      tip.innerHTML = `${clock(p.t)}<br>` + t.series.map(s => `${s.name}: <b>${fmtN(p[s.f], t.dec)}${t.unit ? " " + t.unit : ""}</b>`).join("<br>");
+      tip.style.display = "block";
+      const tr = tile.getBoundingClientRect();
+      let left = ev.clientX - tr.left + 12;
+      if (left + tip.offsetWidth > tr.width) left = ev.clientX - tr.left - tip.offsetWidth - 12;
+      tip.style.left = left + "px"; tip.style.top = (r.top - tr.top - 8) + "px";
+    });
+    svg.addEventListener("mouseleave", () => { t.hover = null; tip.style.display = "none"; drawTile(t); });
+  });
+}
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+}
+function drawTile(t) {
+  const tile = document.getElementById("tile-" + t.key);
+  const enabled = t.need === "system" ? S.system_stats : S.db_stats;
+  const pts = (S.series || []).filter(p => p[t.series[0].f] !== undefined);
+  const val = tile.querySelector(".value"), sub = tile.querySelector(".sub"), svg = tile.querySelector("svg");
+  if (!enabled) { val.innerHTML = "–"; sub.textContent = t.need === "system" ? "not available on this host" : "not available for this engine"; svg.innerHTML = ""; return; }
+  if (!pts.length) { svg.innerHTML = ""; return; }
+  const last = pts[pts.length - 1];
+  const head = t.series.reduce((a, s) => a + (last[s.f] || 0), 0);
+  val.innerHTML = `${fmtN(head, t.dec)}${t.unit ? `<small>${t.unit}</small>` : ""}`;
+  sub.textContent = t.sub(last);
+  const W = 300, H = 54;
+  const ymax = t.max || niceMax(Math.max(...pts.flatMap(p => t.series.map(s => p[s.f] || 0))) * 1.1);
+  const X = i => (i + (180 - pts.length)) / 179 * W, Y = v => H - 2 - (v / ymax) * (H - 4);
+  let h = `<line class="grid" x1="0" x2="${W}" y1="${H - 1}" y2="${H - 1}"/><line class="grid" x1="0" x2="${W}" y1="${Y(ymax / 2)}" y2="${Y(ymax / 2)}"/>`;
+  t.series.forEach((s, k) => {
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p[s.f] || 0).toFixed(1)}`).join("");
+    if (k === 0 && t.series.length === 1) h += `<path class="area" style="fill:var(${s.color})" d="${line}L${X(pts.length - 1)},${H}L${X(0)},${H}Z"/>`;
+    h += `<path class="line" style="stroke:var(${s.color})" d="${line}"/>`;
+  });
+  if (t.hover !== null && t.hover !== undefined && t.hover < pts.length) h += `<line class="cross" x1="${X(t.hover)}" x2="${X(t.hover)}" y1="0" y2="${H}"/>`;
+  svg.innerHTML = h;
 }
 
-function renderDetail() {
-  const el = document.getElementById("detail");
-  const q = state.queries.find(x => x.id === selected);
-  if (!q) return;
-  const running = state.current && state.current.id === q.id;
-  // only re-render when something changed, so text selection in the panel is not lost
-  const key = q.id + ":" + q.runs + ":" + running;
-  if (rendered.key === key) return;
-  rendered.key = key;
-  const L = q.last;
-  let html = `<h2>${q.id} · ${esc(q.name)}</h2>
-    <div class="sub">complexity ${q.complexity} · tables: ${esc(q.tables.join(", "))} ·
-      weight serial ${q.weight.serial} / concurrent ${q.weight.concurrent}</div>
-    <div>${esc(q.description).replace(/\n/g, " ")}</div>`;
-  if (!q.supported) {
-    el.innerHTML = html + `<h3>Status</h3><div class="err">Not supported by ${esc(state.engine)}.</div>`;
-    return;
+/* ---------- current query ---------- */
+function resultTable(e) {
+  if (!e.columns || !e.columns.length) return "";
+  return `<div class="result"><table><tr>${e.columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr>${
+    e.data.map(r => `<tr>${r.map(v => `<td class="${isNum(v) ? "n" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</table></div>`;
+}
+function detailBody(e, openSql) {
+  let h = "";
+  if (e.state !== "running") {
+    if (e.error) h += `<p class="subhead">Error</p><pre class="err">${esc(e.error)}</pre>`;
+    else if (e.columns && e.columns.length && e.rows) h += `<p class="subhead">First ${e.data.length} of ${e.rows} rows</p>${resultTable(e)}`;
+    else h += `<p class="subhead">No rows returned</p>`;
   }
-  html += `<h3>Statistics</h3><div class="kv">
-      <span>runs <b>${q.runs}</b></span><span>ok <b>${q.ok}</b></span>
-      <span>errors <b>${q.errors}</b></span><span>timeouts <b>${q.timeouts}</b></span>
-      <span>min <b>${fmtT(q.min)}</b></span><span>avg <b>${fmtT(q.avg)}</b></span><span>max <b>${fmtT(q.max)}</b></span></div>`;
-  if (running) html += `<h3>Running now</h3><pre>${esc(state.current.sql)}</pre>`;
-  if (L) {
-    html += `<h3>Last execution · ${new Date(L.finished * 1000).toLocaleTimeString()}</h3>
-      <div class="kv"><span>status <b class="${L.status === "ok" ? "" : "err"}">${L.status}</b></span>
-      <span>time <b>${fmtT(L.elapsed)}</b></span><span>rows <b>${L.rows}</b></span></div>
-      <h3>Parameters</h3><div style="font-size:13px">${esc(L.params || "none")}</div>`;
-    if (L.error) html += `<h3>Error</h3><pre class="err">${esc(L.error)}</pre>`;
-    if (L.columns.length) {
-      html += `<h3>First ${L.data.length} of ${L.rows} rows</h3><div class="result"><table><tr>${L.columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr>` +
-        L.data.map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join("")}</tr>`).join("") + `</table></div>`;
+  h += `<details ${openSql ? "open" : ""}><summary>SQL</summary><pre>${esc(e.sql)}</pre></details>`;
+  return h;
+}
+function renderCurrent() {
+  const el = document.getElementById("current"), e = S.current;
+  if (!e) return;
+  const key = e.seq + ":" + e.state;
+  if (key !== curKey) {
+    curKey = key;
+    const running = e.state === "running";
+    el.innerHTML = `<div class="cur-head"><span class="qid">${e.id}</span><span class="qname">${esc(e.name)}</span>
+        <span class="chips"><span class="pill">#${e.seq} · complexity ${e.complexity}</span>
+        <span class="state ${e.state}"><span class="dot"></span><span id="stateText"></span></span></span></div>
+      <p class="cur-desc">${esc(e.description).replace(/\n/g, " ")}</p>
+      <div class="cur-grid">
+        <div>
+          <div class="bigstat"><div class="k">${running ? "Running for" : "Response time"}</div><div class="v" id="curTime">${running ? "" : fmtT(e.elapsed)}</div></div>
+          <div class="bigstat"><div class="k">Rows returned</div><div class="v2">${running ? "…" : fmtN(e.rows, 0)}</div></div>
+          ${running ? "" : `<div class="bigstat"><div class="k">Status</div><div class="v2">${statusHtml(e.status)}</div></div>`}
+          <div class="params"><b>Tables:</b> ${esc(e.tables.join(", "))}<br><b>Parameters:</b> ${esc(e.params || "none")}</div>
+        </div>
+        <div>${detailBody(e, running)}</div>
+      </div>`;
+  }
+  const st = document.getElementById("stateText");
+  if (e.state === "running") {
+    document.getElementById("curTime").textContent = fmtT(Math.max(0, S.now - e.started));
+    st.textContent = "running";
+  } else if (!S.running) {
+    st.textContent = "waiting · paused";
+  } else {
+    const left = S.next_start ? Math.max(0, Math.ceil(S.next_start - S.now)) : 0;
+    st.textContent = left ? `waiting · next query in ${left}s` : "waiting";
+  }
+}
+
+/* ---------- recent queries: newest on top, oldest drops off the bottom ---------- */
+function rowHtml(e) {
+  return `<div class="hmain"><span class="c-seq">#${e.seq}</span><span class="c-time">${clock(e.finished)}</span>
+      <span class="c-id">${e.id}</span><span class="c-name">${esc(e.name)}</span><span class="c-stat">${statusHtml(e.status)}</span>
+      <span class="c-num">${e.status === "ok" ? fmtT(e.elapsed) : `<span class="status ${e.status}">${fmtT(e.elapsed)}</span>`}</span>
+      <span class="c-num">${e.status === "ok" ? fmtN(e.rows, 0) : "–"}</span><span class="c-avg">${fmtT(e.avg)}</span></div>
+    <div class="hdetail"><p class="cur-desc" style="margin:4px 0 10px">${esc(e.description).replace(/\n/g, " ")}</p>
+      <div class="params" style="margin:0 0 10px"><b>Parameters:</b> ${esc(e.params || "none")}</div>${detailBody(e, false)}</div>`;
+}
+function renderHistory() {
+  const list = document.getElementById("hlist"), hist = S.history || [];
+  document.getElementById("histTitle").textContent = hist.length ? `Recent queries (last ${hist.length})` : "Recent queries";
+  const seqs = hist.map(h => h.seq);
+  if (!hist.length || seqs.join() === shownSeqs.join()) return;
+  const known = new Map([...list.querySelectorAll(".hrow")].map(r => [Number(r.dataset.seq), r]));
+  const frag = document.createDocumentFragment();
+  hist.forEach(e => {
+    let r = known.get(e.seq);
+    if (!r) {
+      r = document.createElement("div");
+      r.className = "hrow" + (shownSeqs.length ? " fresh" : "");
+      r.dataset.seq = e.seq;
+      r.innerHTML = rowHtml(e);
+      r.querySelector(".hmain").onclick = () => {
+        r.classList.toggle("open");
+        r.classList.contains("open") ? openSeqs.add(e.seq) : openSeqs.delete(e.seq);
+      };
+      if (openSeqs.has(e.seq)) r.classList.add("open");
     }
-    if (!running) html += `<h3>SQL</h3><pre>${esc(L.sql)}</pre>`;
-  } else if (!running) {
-    html += `<h3>Status</h3><div class="sub">Not run yet in this session.</div>`;
-  }
-  el.innerHTML = html;
+    frag.appendChild(r);
+  });
+  list.innerHTML = "";
+  list.appendChild(frag);
+  shownSeqs = seqs;
 }
 
 async function poll() {
   try {
     const r = await fetch("api/state");
-    state = await r.json();
+    S = await r.json();
     document.getElementById("meta").textContent =
-      `${state.target} · ${state.server_version} · ${state.database} · cycle ${state.cycle} · timeout ${state.timeout}s`;
-    const pausing = !state.running && state.current;
-    document.getElementById("pill").textContent = state.running ? "running" : (pausing ? "pausing after current query" : "paused");
-    const b = document.getElementById("toggle");
-    b.textContent = state.running ? "Pause" : "Resume";
-    b.className = state.running ? "" : "primary";
-    if (!selected && state.queries.length) selected = state.queries[0].id;
-    renderList();
-    renderDetail();
+      `${S.target} · ${S.server_version} · ${S.database} · ${S.executed} queries run · at most one query every ${S.interval}s (${S.order})` +
+      (S.unsupported.length ? ` · not supported by ${S.engine}: ${S.unsupported.join(", ")}` : "");
+    const pill = document.getElementById("pill"), b = document.getElementById("toggle");
+    pill.textContent = S.running ? "running" : (S.current && S.current.state === "running" ? "pausing after this query" : "paused");
+    b.textContent = S.running ? "Pause" : "Resume";
+    b.className = S.running ? "" : "primary";
+    TILES.forEach(drawTile);
+    renderCurrent();
+    renderHistory();
   } catch (e) {
     document.getElementById("pill").textContent = "disconnected";
   }
   setTimeout(poll, 1000);
 }
 document.getElementById("toggle").onclick = async () => {
-  await fetch(state && state.running ? "api/pause" : "api/resume", {method: "POST"});
-  rendered = {};
+  await fetch(S && S.running ? "api/pause" : "api/resume", {method: "POST"});
+  curKey = null;
 };
+buildTiles();
 poll();
 </script>
 </body>
