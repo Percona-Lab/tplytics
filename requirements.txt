@@ -1,0 +1,3 @@
+PyMySQL>=1.0          # MySQL, Percona Server, MariaDB
+psycopg[binary]>=3.1  # PostgreSQL
+tomli>=2.0; python_version < "3.11"

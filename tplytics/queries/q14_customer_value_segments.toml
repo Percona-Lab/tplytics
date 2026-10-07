@@ -1,0 +1,55 @@
+id = "Q14"
+name = "Customer value segments"
+complexity = 3
+tables = ["orders", "order_line", "customer"]
+description = """
+How is revenue spread over the customer base? Computes what every customer
+of a slice of warehouses spent in a time window, places each customer
+(including the inactive ones) into a spend segment and summarises the
+segments per credit rating: customers, orders, revenue, average spend and
+average discount.
+CTE with aggregation over orders and order_line, outer-joined to customer.
+"""
+weight = { serial = 1, concurrent = 2 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.02, 0.1], min = 1, max = 10 }
+win = { type = "time_window", fraction = [0.1, 0.6], anchor = "mixed" }
+low = { type = "choice", values = [1000, 2000, 3000] }
+high = { type = "choice", values = [6000, 8000, 10000] }
+
+[sql]
+default = """
+WITH spend AS (
+  SELECT o.o_w_id                                              AS w_id,
+         o.o_d_id                                              AS d_id,
+         o.o_c_id                                              AS c_id,
+         SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END)     AS orders,
+         SUM(ol.ol_amount)                                     AS amount
+  FROM   orders o
+  JOIN   order_line ol ON ol.ol_w_id = o.o_w_id AND ol.ol_d_id = o.o_d_id AND ol.ol_o_id = o.o_id
+  WHERE  o.o_w_id BETWEEN {wh_lo} AND {wh_hi}
+    AND  o.o_entry_d >= {win_start} AND o.o_entry_d < {win_end}
+  GROUP  BY o.o_w_id, o.o_d_id, o.o_c_id
+), segmented AS (
+  SELECT c.c_credit,
+         CASE WHEN s.amount IS NULL    THEN '0: inactive'
+              WHEN s.amount < {low}    THEN '1: low'
+              WHEN s.amount < {high}   THEN '2: medium'
+              ELSE                          '3: high' END    AS segment,
+         s.orders, s.amount, c.c_discount
+  FROM   customer c
+  LEFT   JOIN spend s ON s.w_id = c.c_w_id AND s.d_id = c.c_d_id AND s.c_id = c.c_id
+  WHERE  c.c_w_id BETWEEN {wh_lo} AND {wh_hi}
+)
+SELECT c_credit                                      AS credit,
+       segment,
+       COUNT(*)                                      AS customers,
+       COALESCE(SUM(orders), 0)                      AS orders,
+       COALESCE(SUM(amount), 0)                      AS revenue,
+       ROUND(AVG(amount), 2)                         AS avg_spend,
+       ROUND(100 * AVG(c_discount), 2)               AS avg_discount_pct
+FROM   segmented
+GROUP  BY c_credit, segment
+ORDER  BY c_credit, segment
+"""

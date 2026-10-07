@@ -1,0 +1,8 @@
+id = "E03"
+name = "PostgreSQL only"
+description = "Only has PostgreSQL SQL; MySQL engines must skip it."
+weight = { serial = 1, concurrent = 1 }
+unsupported = ["mariadb"]
+[sql]
+postgresql = "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY i_price) FROM item"
+mysql = false

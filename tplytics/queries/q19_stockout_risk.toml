@@ -1,0 +1,48 @@
+id = "Q19"
+name = "Stock-out risk"
+complexity = 3
+tables = ["district", "order_line", "stock", "item"]
+description = """
+Which items will run out first? Measures recent demand per supplying
+warehouse and item from the latest orders of a slice of warehouses, compares
+it with the stock on hand and lists the items whose stock covers less than
+the chosen multiple of recent demand, most urgent first.
+CTE aggregation over district + order_line joined to stock and item.
+"""
+weight = { serial = 1, concurrent = 2 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.05, 0.25], min = 1, max = 25 }
+last = { type = "choice", values = [500, 1000, 2000] }
+cover = { type = "choice", values = [1, 2, 3] }
+top = { type = "choice", values = [20, 50] }
+
+[sql]
+default = """
+WITH demand AS (
+  SELECT ol.ol_supply_w_id      AS w_id,
+         ol.ol_i_id             AS i_id,
+         SUM(ol.ol_quantity)    AS units,
+         COUNT(*)               AS order_lines
+  FROM   district d
+  JOIN   order_line ol ON ol.ol_w_id = d.d_w_id AND ol.ol_d_id = d.d_id
+                      AND ol.ol_o_id >= d.d_next_o_id - {last}
+  WHERE  d.d_w_id BETWEEN {wh_lo} AND {wh_hi}
+  GROUP  BY ol.ol_supply_w_id, ol.ol_i_id
+)
+SELECT dm.w_id,
+       dm.i_id,
+       i.i_name,
+       i.i_price,
+       s.s_quantity                                   AS on_hand,
+       dm.units                                       AS recent_demand,
+       dm.order_lines,
+       ROUND(1.0 * s.s_quantity / dm.units, 2)        AS cover_ratio,
+       dm.units * i.i_price                           AS demand_value
+FROM   demand dm
+JOIN   stock s ON s.s_w_id = dm.w_id AND s.s_i_id = dm.i_id
+JOIN   item  i ON i.i_id = dm.i_id
+WHERE  s.s_quantity < dm.units * {cover}
+ORDER  BY cover_ratio, demand_value DESC, dm.w_id, dm.i_id
+LIMIT  {top}
+"""

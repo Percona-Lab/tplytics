@@ -1,0 +1,43 @@
+id = "Q17"
+name = "Order value deciles"
+complexity = 3
+tables = ["orders", "order_line"]
+description = """
+What does the distribution of order values look like? Totals every order of
+a time window in a slice of warehouses, splits them into ten deciles (NTILE)
+and shows per decile the value range, average lines per order, the share of
+total revenue and the share of orders with remote lines.
+Aggregation, NTILE window function and a windowed aggregate over the result.
+"""
+weight = { serial = 1, concurrent = 2 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.05, 0.25], min = 1, max = 50 }
+win = { type = "time_window", fraction = [0.05, 0.4], anchor = "mixed" }
+
+[sql]
+default = """
+WITH order_totals AS (
+  SELECT o.o_w_id, o.o_d_id, o.o_id, o.o_ol_cnt, o.o_all_local,
+         SUM(ol.ol_amount) AS total
+  FROM   orders o
+  JOIN   order_line ol ON ol.ol_w_id = o.o_w_id AND ol.ol_d_id = o.o_d_id AND ol.ol_o_id = o.o_id
+  WHERE  o.o_w_id BETWEEN {wh_lo} AND {wh_hi}
+    AND  o.o_entry_d >= {win_start} AND o.o_entry_d < {win_end}
+  GROUP  BY o.o_w_id, o.o_d_id, o.o_id, o.o_ol_cnt, o.o_all_local
+), deciles AS (
+  SELECT t.*, NTILE(10) OVER (ORDER BY t.total) AS decile
+  FROM   order_totals t
+)
+SELECT decile,
+       COUNT(*)                                                         AS orders,
+       MIN(total)                                                       AS min_value,
+       MAX(total)                                                       AS max_value,
+       ROUND(AVG(total), 2)                                             AS avg_value,
+       ROUND(AVG(o_ol_cnt), 2)                                          AS avg_lines,
+       ROUND(100.0 * SUM(total) / NULLIF(SUM(SUM(total)) OVER (), 0), 2) AS pct_of_revenue,
+       ROUND(100.0 * SUM(CASE WHEN o_all_local = 0 THEN 1 ELSE 0 END) / COUNT(*), 2) AS pct_with_remote
+FROM   deciles
+GROUP  BY decile
+ORDER  BY decile
+"""

@@ -1,0 +1,8 @@
+id = "E04"
+name = "Fast query"
+description = "Trivial query that must succeed."
+weight = { serial = 2, concurrent = 5 }
+[params]
+w = { type = "warehouse" }
+[sql]
+default = "SELECT w_id, w_name, w_ytd FROM warehouse WHERE w_id = {w}"

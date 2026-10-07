@@ -1,0 +1,30 @@
+id = "Q07"
+name = "Order line fulfilment status"
+complexity = 1
+tables = ["order_line"]
+description = """
+How much ordered value is still waiting for delivery? For a few warehouses
+summarises every order line: lines and value delivered versus pending,
+average quantity, and the share of lines supplied by another warehouse.
+Single table, but order_line is the largest table (about 300,000 rows per
+warehouse at load time, growing with every New-Order).
+"""
+weight = { serial = 2, concurrent = 4 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.01, 0.05], min = 1, max = 5 }
+
+[sql]
+default = """
+SELECT ol_w_id                                                               AS w_id,
+       COUNT(*)                                                              AS order_lines,
+       SUM(CASE WHEN ol_delivery_d IS NULL THEN 1 ELSE 0 END)                AS pending_lines,
+       SUM(CASE WHEN ol_delivery_d IS NULL THEN ol_amount ELSE 0 END)        AS pending_value,
+       SUM(CASE WHEN ol_delivery_d IS NOT NULL THEN ol_amount ELSE 0 END)    AS delivered_value,
+       ROUND(AVG(ol_quantity), 2)                                            AS avg_quantity,
+       ROUND(100.0 * SUM(CASE WHEN ol_supply_w_id <> ol_w_id THEN 1 ELSE 0 END) / COUNT(*), 3) AS pct_remote_supply
+FROM   order_line
+WHERE  ol_w_id BETWEEN {wh_lo} AND {wh_hi}
+GROUP  BY ol_w_id
+ORDER  BY ol_w_id
+"""

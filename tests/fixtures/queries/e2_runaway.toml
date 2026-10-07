@@ -1,0 +1,6 @@
+id = "E02"
+name = "Runaway query"
+description = "Cartesian product that never finishes in time: must be killed and reported as timeout."
+weight = { serial = 1, concurrent = 1 }
+[sql]
+default = "SELECT COUNT(*) FROM order_line a CROSS JOIN order_line b WHERE a.ol_amount > b.ol_amount"

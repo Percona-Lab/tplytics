@@ -1,0 +1,32 @@
+id = "Q01"
+name = "Warehouse leaderboard"
+complexity = 1
+tables = ["district"]
+description = """
+Which warehouses take the most orders and collect the most money? Ranks a
+random slice of warehouses by orders taken (from the district order counters)
+or by year-to-date payments, with the payment collected per order and how
+unevenly the orders are spread over each warehouse's districts.
+Single table, tiny: a primary-key range scan of the district table.
+"""
+weight = { serial = 3, concurrent = 10 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.2, 1.0], min = 1 }
+order_by = { type = "choice", values = ["orders_taken", "ytd_payments", "district_spread"], raw = true }
+top = { type = "choice", values = [5, 10, 20] }
+
+[sql]
+default = """
+SELECT d_w_id                                                   AS w_id,
+       SUM(d_next_o_id - 1)                                     AS orders_taken,
+       SUM(d_ytd)                                               AS ytd_payments,
+       ROUND(SUM(d_ytd) / NULLIF(SUM(d_next_o_id - 1), 0), 2)   AS payment_per_order,
+       MAX(d_next_o_id) - MIN(d_next_o_id)                      AS district_spread,
+       ROUND(100 * AVG(d_tax), 2)                               AS avg_tax_pct
+FROM   district
+WHERE  d_w_id BETWEEN {wh_lo} AND {wh_hi}
+GROUP  BY d_w_id
+ORDER  BY {order_by} DESC, w_id
+LIMIT  {top}
+"""

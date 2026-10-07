@@ -1,0 +1,48 @@
+id = "Q08"
+name = "Sales trend"
+complexity = 2
+tables = ["orders", "order_line"]
+description = """
+How are sales developing over time? For a slice of warehouses and a time
+window buckets orders by entry time and reports orders, order lines, revenue,
+average order size and value, and the share of lines supplied remotely.
+Two-table join; the order date has no index, so the warehouse slice is read
+through the primary key and filtered on time.
+"""
+weight = { serial = 2, concurrent = 5 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.05, 0.25], min = 1, max = 50 }
+win = { type = "time_window", fraction = [0.05, 0.5], anchor = "mixed", buckets = 24 }
+
+[sql]
+mysql = """
+SELECT FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(o.o_entry_d) / {win_bucket}) * {win_bucket}) AS period_start,
+       SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END)            AS orders,
+       COUNT(*)                                                     AS order_lines,
+       SUM(ol.ol_amount)                                            AS revenue,
+       ROUND(1.0 * COUNT(*) / NULLIF(SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END), 0), 2) AS lines_per_order,
+       ROUND(SUM(ol.ol_amount) / NULLIF(SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END), 0), 2) AS avg_order_value,
+       ROUND(100.0 * SUM(CASE WHEN ol.ol_supply_w_id <> ol.ol_w_id THEN 1 ELSE 0 END) / COUNT(*), 3) AS pct_remote_lines
+FROM   orders o
+JOIN   order_line ol ON ol.ol_w_id = o.o_w_id AND ol.ol_d_id = o.o_d_id AND ol.ol_o_id = o.o_id
+WHERE  o.o_w_id BETWEEN {wh_lo} AND {wh_hi}
+  AND  o.o_entry_d >= {win_start} AND o.o_entry_d < {win_end}
+GROUP  BY 1
+ORDER  BY 1
+"""
+postgresql = """
+SELECT to_timestamp(FLOOR(EXTRACT(EPOCH FROM o.o_entry_d) / {win_bucket}) * {win_bucket}) AS period_start,
+       SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END)            AS orders,
+       COUNT(*)                                                     AS order_lines,
+       SUM(ol.ol_amount)                                            AS revenue,
+       ROUND(1.0 * COUNT(*) / NULLIF(SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END), 0), 2) AS lines_per_order,
+       ROUND(SUM(ol.ol_amount) / NULLIF(SUM(CASE WHEN ol.ol_number = 1 THEN 1 ELSE 0 END), 0), 2) AS avg_order_value,
+       ROUND(100.0 * SUM(CASE WHEN ol.ol_supply_w_id <> ol.ol_w_id THEN 1 ELSE 0 END) / COUNT(*), 3) AS pct_remote_lines
+FROM   orders o
+JOIN   order_line ol ON ol.ol_w_id = o.o_w_id AND ol.ol_d_id = o.o_d_id AND ol.ol_o_id = o.o_id
+WHERE  o.o_w_id BETWEEN {wh_lo} AND {wh_hi}
+  AND  o.o_entry_d >= {win_start} AND o.o_entry_d < {win_end}
+GROUP  BY 1
+ORDER  BY 1
+"""

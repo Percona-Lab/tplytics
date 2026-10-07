@@ -1,0 +1,36 @@
+id = "Q09"
+name = "Best sellers"
+complexity = 2
+tables = ["district", "order_line", "item"]
+description = """
+What sells best right now? Looks at the most recent N orders of every
+district in a slice of warehouses and ranks items by units sold, revenue or
+number of order lines, with the item name and price.
+Join of district (to find the latest orders), order_line and item.
+"""
+weight = { serial = 2, concurrent = 5 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.05, 0.25], min = 1, max = 25 }
+last = { type = "choice", values = [100, 250, 500, 1000, 2000] }
+metric = { type = "choice", values = ["units", "revenue", "order_lines"], raw = true }
+top = { type = "choice", values = [10, 20, 50] }
+
+[sql]
+default = """
+SELECT i.i_id,
+       i.i_name,
+       i.i_price,
+       SUM(ol.ol_quantity)              AS units,
+       SUM(ol.ol_amount)                AS revenue,
+       COUNT(*)                         AS order_lines,
+       COUNT(DISTINCT ol.ol_w_id)       AS warehouses
+FROM   district d
+JOIN   order_line ol ON ol.ol_w_id = d.d_w_id AND ol.ol_d_id = d.d_id
+                    AND ol.ol_o_id >= d.d_next_o_id - {last}
+JOIN   item i ON i.i_id = ol.ol_i_id
+WHERE  d.d_w_id BETWEEN {wh_lo} AND {wh_hi}
+GROUP  BY i.i_id, i.i_name, i.i_price
+ORDER  BY {metric} DESC, i.i_id
+LIMIT  {top}
+"""

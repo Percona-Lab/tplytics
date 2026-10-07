@@ -1,0 +1,33 @@
+id = "Q02"
+name = "Catalog price bands"
+complexity = 1
+tables = ["item"]
+description = """
+How is the product catalog priced? Splits a slice of the item catalog into
+price bands and shows the number of items, the average price and the share
+of "ORIGINAL" (brand) items in every band.
+Single table: scan of part of the item table (100,000 rows at most),
+independent of the number of warehouses.
+"""
+weight = { serial = 3, concurrent = 10 }
+
+[params]
+items = { type = "item_range", fraction = [0.25, 1.0] }
+band = { type = "choice", values = [5, 10, 20, 25] }
+
+[sql]
+default = """
+SELECT price_from,
+       price_from + {band}                                        AS price_to,
+       COUNT(*)                                                   AS items,
+       ROUND(AVG(i_price), 2)                                     AS avg_price,
+       SUM(is_original)                                           AS original_items,
+       ROUND(100.0 * SUM(is_original) / COUNT(*), 2)              AS pct_original
+FROM  (SELECT i_price,
+              FLOOR(i_price / {band}) * {band}                    AS price_from,
+              CASE WHEN i_data LIKE '%ORIGINAL%' THEN 1 ELSE 0 END AS is_original
+       FROM   item
+       WHERE  i_id BETWEEN {items_lo} AND {items_hi}) t
+GROUP  BY price_from
+ORDER  BY price_from
+"""

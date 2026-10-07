@@ -1,0 +1,42 @@
+id = "Q05"
+name = "Payment activity over time"
+complexity = 1
+tables = ["history"]
+description = """
+How much money comes in, and when? Buckets all payments in a time window
+(sized to the transaction history actually stored) and reports the number of
+payments, amount collected, average and largest payment, and how many
+payments were made through a remote warehouse.
+Single table, but history has no index on the date, so this scans the whole
+table and grows with the database and with the length of the HammerDB run.
+"""
+weight = { serial = 2, concurrent = 4 }
+
+[params]
+win = { type = "time_window", fraction = [0.05, 0.5], anchor = "mixed", buckets = 24 }
+
+[sql]
+mysql = """
+SELECT FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(h_date) / {win_bucket}) * {win_bucket}) AS period_start,
+       COUNT(*)                                                    AS payments,
+       SUM(h_amount)                                               AS amount,
+       ROUND(AVG(h_amount), 2)                                     AS avg_payment,
+       MAX(h_amount)                                               AS max_payment,
+       SUM(CASE WHEN h_c_w_id <> h_w_id THEN 1 ELSE 0 END)         AS remote_payments
+FROM   history
+WHERE  h_date >= {win_start} AND h_date < {win_end}
+GROUP  BY 1
+ORDER  BY 1
+"""
+postgresql = """
+SELECT to_timestamp(FLOOR(EXTRACT(EPOCH FROM h_date) / {win_bucket}) * {win_bucket}) AS period_start,
+       COUNT(*)                                                    AS payments,
+       SUM(h_amount)                                               AS amount,
+       ROUND(AVG(h_amount), 2)                                     AS avg_payment,
+       MAX(h_amount)                                               AS max_payment,
+       SUM(CASE WHEN h_c_w_id <> h_w_id THEN 1 ELSE 0 END)         AS remote_payments
+FROM   history
+WHERE  h_date >= {win_start} AND h_date < {win_end}
+GROUP  BY 1
+ORDER  BY 1
+"""

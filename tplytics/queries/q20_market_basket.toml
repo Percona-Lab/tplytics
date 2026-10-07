@@ -1,0 +1,58 @@
+id = "Q20"
+name = "Market basket analysis"
+complexity = 4
+tables = ["district", "order_line", "item"]
+description = """
+Which items are bought together? Takes the latest orders of a slice of
+warehouses, self-joins their order lines to count item pairs that appear in
+the same order, and reports the strongest pairs with support, confidence and
+lift (how much more often the pair occurs than chance would predict).
+The heaviest query: a self-join that grows quadratically with order size,
+several CTEs referenced more than once and a final join to item.
+"""
+weight = { serial = 1, concurrent = 1 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.02, 0.1], min = 1, max = 8 }
+last = { type = "choice", values = [250, 500, 1000] }
+min_support = { type = "choice", values = [2, 3] }
+top = { type = "choice", values = [10, 20] }
+
+[sql]
+default = """
+WITH basket AS (
+  SELECT DISTINCT ol.ol_w_id AS w_id, ol.ol_d_id AS d_id, ol.ol_o_id AS o_id, ol.ol_i_id AS i_id
+  FROM   district d
+  JOIN   order_line ol ON ol.ol_w_id = d.d_w_id AND ol.ol_d_id = d.d_id
+                      AND ol.ol_o_id >= d.d_next_o_id - {last}
+  WHERE  d.d_w_id BETWEEN {wh_lo} AND {wh_hi}
+), item_orders AS (
+  SELECT i_id, COUNT(*) AS n FROM basket GROUP BY i_id
+), total AS (
+  SELECT COUNT(*) AS n FROM (SELECT DISTINCT w_id, d_id, o_id FROM basket) o
+), pairs AS (
+  SELECT a.i_id AS item_a, b.i_id AS item_b, COUNT(*) AS together
+  FROM   basket a
+  JOIN   basket b ON b.w_id = a.w_id AND b.d_id = a.d_id AND b.o_id = a.o_id AND b.i_id > a.i_id
+  GROUP  BY a.i_id, b.i_id
+  HAVING COUNT(*) >= {min_support}
+)
+SELECT p.item_a,
+       ia_item.i_name                                                AS name_a,
+       p.item_b,
+       ib_item.i_name                                                AS name_b,
+       p.together,
+       ia.n                                                          AS orders_with_a,
+       ib.n                                                          AS orders_with_b,
+       ROUND(100.0 * p.together / t.n, 4)                            AS support_pct,
+       ROUND(1.0 * p.together / ia.n, 3)                             AS confidence_a_b,
+       ROUND(1.0 * p.together * t.n / (ia.n * ib.n), 1)              AS lift
+FROM   pairs p
+JOIN   item_orders ia ON ia.i_id = p.item_a
+JOIN   item_orders ib ON ib.i_id = p.item_b
+JOIN   item ia_item   ON ia_item.i_id = p.item_a
+JOIN   item ib_item   ON ib_item.i_id = p.item_b
+CROSS  JOIN total t
+ORDER  BY p.together DESC, lift DESC, p.item_a, p.item_b
+LIMIT  {top}
+"""

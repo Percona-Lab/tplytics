@@ -1,0 +1,50 @@
+id = "Q16"
+name = "Customer churn"
+complexity = 3
+tables = ["orders", "customer"]
+description = """
+Which customers stopped buying? Splits a time window in two halves, takes the
+customers of a slice of warehouses who ordered in the first half and checks
+(NOT EXISTS) whether they ordered again in the second half. Reports churn per
+warehouse and compares the account balances of churned and retained
+customers.
+Correlated EXISTS subquery (served by the orders customer index) plus a join
+to customer.
+"""
+weight = { serial = 1, concurrent = 2 }
+
+[params]
+wh = { type = "warehouse_range", fraction = [0.02, 0.1], min = 1, max = 10 }
+win = { type = "time_window", fraction = [0.2, 0.8], anchor = "recent" }
+top = { type = "choice", values = [10, 20] }
+
+[sql]
+default = """
+WITH early AS (
+  SELECT o_w_id AS w_id, o_d_id AS d_id, o_c_id AS c_id, COUNT(*) AS orders
+  FROM   orders
+  WHERE  o_w_id BETWEEN {wh_lo} AND {wh_hi}
+    AND  o_entry_d >= {win_start} AND o_entry_d < {win_mid}
+  GROUP  BY o_w_id, o_d_id, o_c_id
+), flagged AS (
+  SELECT e.*,
+         CASE WHEN EXISTS (SELECT 1 FROM orders o2
+                           WHERE  o2.o_w_id = e.w_id AND o2.o_d_id = e.d_id AND o2.o_c_id = e.c_id
+                             AND  o2.o_entry_d >= {win_mid} AND o2.o_entry_d < {win_end})
+              THEN 0 ELSE 1 END AS churned
+  FROM   early e
+)
+SELECT f.w_id,
+       COUNT(*)                                                        AS early_customers,
+       SUM(f.churned)                                                  AS churned,
+       ROUND(100.0 * SUM(f.churned) / COUNT(*), 2)                     AS churn_pct,
+       ROUND(AVG(CASE WHEN f.churned = 1 THEN f.orders END), 2)        AS early_orders_churned,
+       ROUND(AVG(CASE WHEN f.churned = 0 THEN f.orders END), 2)        AS early_orders_retained,
+       ROUND(AVG(CASE WHEN f.churned = 1 THEN c.c_balance END), 2)     AS avg_balance_churned,
+       ROUND(AVG(CASE WHEN f.churned = 0 THEN c.c_balance END), 2)     AS avg_balance_retained
+FROM   flagged f
+JOIN   customer c ON c.c_w_id = f.w_id AND c.c_d_id = f.d_id AND c.c_id = f.c_id
+GROUP  BY f.w_id
+ORDER  BY churn_pct DESC, f.w_id
+LIMIT  {top}
+"""

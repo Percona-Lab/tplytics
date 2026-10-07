@@ -1,0 +1,6 @@
+id = "E01"
+name = "Broken SQL"
+description = "Deliberately invalid SQL: must be reported as an error, not stop the run."
+weight = { serial = 1, concurrent = 1 }
+[sql]
+default = "SELEC w_id FROM warehouse"
