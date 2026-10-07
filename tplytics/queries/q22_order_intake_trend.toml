@@ -1,0 +1,60 @@
+id = "Q22"
+name = "Company-wide order intake trend"
+complexity = 4
+tables = ["orders"]
+description = """
+How is order intake developing across the whole company? Buckets every order
+in a long time window (half to all of the stored history) and reports orders,
+order lines, the share of orders with remote lines, the share already
+delivered, how many warehouses were active, and a running total of orders
+over the window (a window function over the aggregated buckets).
+Full table scan of orders: no warehouse filter, and the order date has no
+index, so every order is read. Cost grows with the database and with the
+length of the HammerDB run.
+"""
+weight = { serial = 0.5, concurrent = 0.5 }
+
+[params]
+win = { type = "time_window", fraction = [0.5, 1.0], anchor = "recent", buckets = 24 }
+
+[sql]
+mysql = """
+SELECT period_start,
+       orders,
+       order_lines,
+       ROUND(1.0 * order_lines / orders, 2)                     AS lines_per_order,
+       ROUND(100.0 * remote_orders / orders, 2)                 AS pct_remote_orders,
+       ROUND(100.0 * delivered_orders / orders, 2)              AS pct_delivered,
+       active_warehouses,
+       SUM(orders) OVER (ORDER BY period_start)                 AS running_orders
+FROM  (SELECT FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(o_entry_d) / {win_bucket}) * {win_bucket}) AS period_start,
+              COUNT(*)                                                      AS orders,
+              SUM(o_ol_cnt)                                                 AS order_lines,
+              SUM(CASE WHEN o_all_local = 0 THEN 1 ELSE 0 END)              AS remote_orders,
+              SUM(CASE WHEN o_carrier_id IS NOT NULL THEN 1 ELSE 0 END)     AS delivered_orders,
+              COUNT(DISTINCT o_w_id)                                        AS active_warehouses
+       FROM   orders
+       WHERE  o_entry_d >= {win_start} AND o_entry_d < {win_end}
+       GROUP  BY 1) b
+ORDER  BY period_start
+"""
+postgresql = """
+SELECT period_start,
+       orders,
+       order_lines,
+       ROUND(1.0 * order_lines / orders, 2)                     AS lines_per_order,
+       ROUND(100.0 * remote_orders / orders, 2)                 AS pct_remote_orders,
+       ROUND(100.0 * delivered_orders / orders, 2)              AS pct_delivered,
+       active_warehouses,
+       SUM(orders) OVER (ORDER BY period_start)                 AS running_orders
+FROM  (SELECT to_timestamp(FLOOR(EXTRACT(EPOCH FROM o_entry_d) / {win_bucket}) * {win_bucket}) AS period_start,
+              COUNT(*)                                                      AS orders,
+              SUM(o_ol_cnt)                                                 AS order_lines,
+              SUM(CASE WHEN o_all_local = 0 THEN 1 ELSE 0 END)              AS remote_orders,
+              SUM(CASE WHEN o_carrier_id IS NOT NULL THEN 1 ELSE 0 END)     AS delivered_orders,
+              COUNT(DISTINCT o_w_id)                                        AS active_warehouses
+       FROM   orders
+       WHERE  o_entry_d >= {win_start} AND o_entry_d < {win_end}
+       GROUP  BY 1) b
+ORDER  BY period_start
+"""

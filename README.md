@@ -6,8 +6,8 @@ workload. It is meant to run **at the same time as HammerDB**, so you can see
 how an OLTP database copes when reporting queries hit the tables it is
 writing to, and how much each workload slows the other down.
 
-* 20 analytical queries with a business meaning, from single-table scans to
-  multi-join, window-function and self-join queries.
+* 22 analytical queries with a business meaning, from single-table lookups to
+  multi-join, window-function, self-join and whole-table-scan queries.
 * Every query has a **weight** for serial mode and one for concurrent mode, so
   cheap queries can run more often than expensive ones.
 * Parameters are drawn **fresh for every execution** from the database itself:
@@ -277,9 +277,11 @@ time windows will cover warehouses that HammerDB never touches.
 | Q18 | District benchmarking | 3 | orders, order_line | 1 | 2 | Districts deviating most from their warehouse average |
 | Q19 | Stock-out risk | 3 | district, order_line, stock, item | 1 | 2 | Items whose stock covers less than recent demand |
 | Q20 | Market basket analysis | 4 | district, order_line, item | 1 | 1 | Item pairs bought together: support, confidence, lift |
+| Q21 | Company-wide supplier scorecard | 4 | order_line | 0.5 | 0.5 | Which warehouses fulfil the most demand (full scan of order_line) |
+| Q22 | Company-wide order intake trend | 4 | orders | 0.5 | 0.5 | Orders per time bucket for the whole company, running total (full scan of orders) |
 
 Complexity (cx): 1 = single table, 2 = join, 3 = CTEs / window functions /
-correlated subqueries over joins, 4 = heavy self-join.
+correlated subqueries over joins, 4 = heavy (self-join or full scan of a large table).
 
 ### How parameters adapt to the database
 
@@ -301,9 +303,16 @@ draws them from that state:
   looks at current activity.
 * top-N, thresholds, sort columns and other choices are drawn from lists.
 
-Two queries, Q05 and Q11, deliberately scan the whole `history` table, which has
-no index on its date. Their cost grows with the size of the database and with
-the length of the HammerDB run.
+Four queries deliberately read a whole table, and their cost grows with the
+size of the database and with the length of the HammerDB run:
+
+* Q05 and Q11 scan `history`, which has no index on its date.
+* Q21 scans all of `order_line`, the largest table (about 60 M rows at 200
+  warehouses; ~130 s on a 4 GB / 2 vCPU box).
+* Q22 scans all of `orders` (6 M rows at 200 warehouses; ~11 s).
+
+Q21 and Q22 have the lowest weights (0.5), so they run about once for every
+20 executions of the cheapest queries.
 
 HammerDB specifics the queries respect: the loader writes `ol_amount = 0` for
 the orders delivered at load time, and all remote supply lines come from the
@@ -437,7 +446,7 @@ same machine:
 
 | | Percona Server 9.7, 40 warehouses | PostgreSQL 16, 20 warehouses |
 |---|---|---|
-| demo, all 20 queries | all OK, 10 ms – 50 s (Q20 before its slice was capped) | all OK, 5 ms – 2.7 s |
+| demo, Q01–Q20 | all OK, 10 ms – 50 s (Q20 before its slice was capped) | all OK, 5 ms – 2.7 s |
 | serial `-n 3` with HammerDB 4 VU | 111/111 OK in 227 s, geomean of averages 0.84 s | |
 | concurrent 6 threads, saturating, with HammerDB 4 VU | 1.75 QPS, p50 0.94 s, p95 13.7 s, 100 % OK | |
 | concurrent 8 threads, `--think 20 --timeout 10` | 92.7 % OK, 16 timeouts (Q09, Q12, Q13, Q19, Q20) | |

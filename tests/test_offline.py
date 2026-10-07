@@ -31,9 +31,9 @@ class OfflineTests(unittest.TestCase):
         opts = types.SimpleNamespace(schema=None)
         self.engines = [cls(opts) for cls in ENGINES.values()]
 
-    def test_twenty_unique_queries(self):
-        self.assertEqual(len(self.queries), 20)
-        self.assertEqual(len({q.id for q in self.queries}), 20)
+    def test_unique_queries(self):
+        self.assertEqual(len(self.queries), 22)
+        self.assertEqual(len({q.id for q in self.queries}), 22)
 
     def test_render_all_engines(self):
         rng = random.Random(1)

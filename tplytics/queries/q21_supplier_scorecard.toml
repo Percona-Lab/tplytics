@@ -1,0 +1,37 @@
+id = "Q21"
+name = "Company-wide supplier scorecard"
+complexity = 4
+tables = ["order_line"]
+description = """
+Which warehouses carry the company's fulfilment load? Looks at every order
+line ever stored and ranks the supplying warehouses by revenue, units or
+lines shipped, with the share of their lines shipped to other warehouses and
+the share still waiting for delivery. An optional minimum line quantity
+narrows the report to bulk lines without making it cheaper.
+Full table scan of order_line, the largest table (about 30 rows per order,
+growing with every New-Order): there is no index on the supplying warehouse,
+so the whole table is read and aggregated. Cost grows with the database and
+with the length of the HammerDB run.
+"""
+weight = { serial = 0.5, concurrent = 0.5 }
+
+[params]
+min_qty = { type = "choice", values = [1, 1, 5, 8] }
+metric = { type = "choice", values = ["revenue", "units", "order_lines"], raw = true }
+top = { type = "choice", values = [10, 20] }
+
+[sql]
+default = """
+SELECT ol_supply_w_id                                                          AS supply_w_id,
+       COUNT(*)                                                                AS order_lines,
+       SUM(ol_quantity)                                                        AS units,
+       SUM(ol_amount)                                                          AS revenue,
+       ROUND(100.0 * SUM(CASE WHEN ol_supply_w_id <> ol_w_id THEN 1 ELSE 0 END) / COUNT(*), 3) AS pct_shipped_remote,
+       ROUND(100.0 * SUM(CASE WHEN ol_delivery_d IS NULL THEN 1 ELSE 0 END) / COUNT(*), 2)    AS pct_pending,
+       COUNT(DISTINCT ol_i_id)                                                 AS distinct_items
+FROM   order_line
+WHERE  ol_quantity >= {min_qty}
+GROUP  BY ol_supply_w_id
+ORDER  BY {metric} DESC, supply_w_id
+LIMIT  {top}
+"""
