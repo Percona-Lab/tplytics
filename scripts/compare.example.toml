@@ -9,6 +9,10 @@ listen = "0.0.0.0"
 http_port = 8080
 interval = 10
 timeout = 120
+# One point per full pass over the queries, kept across restarts for the
+# long-term chart at the bottom of the page (default: memory only).
+history_file = "/var/lib/tplytics/compare-passes.jsonl"
+keep_hours = 24
 
 # Optional: the primary, for its transactions/s (any account that can connect).
 [primary]

@@ -220,6 +220,10 @@ def build_parser():
                    help="seconds between re-reading each target's size and time range (default 60)")
     g.add_argument("--system-stats", choices=["auto", "off"], default="auto",
                    help="CPU and disk load of this host (auto: on Linux)")
+    g.add_argument("--history-file", default=None, metavar="FILE",
+                   help="JSON-lines file keeping one point per full pass over the queries, so the "
+                        "long-term chart survives restarts (default: kept in memory only)")
+    g.add_argument("--keep-hours", type=float, default=24, help="hours the long-term chart covers (default 24)")
     p.set_defaults(func=run_compare, mode=None,
                    defaults={a.dest: a.default for a in p._actions if a.dest != "help"})
 

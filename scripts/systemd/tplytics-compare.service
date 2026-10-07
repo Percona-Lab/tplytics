@@ -1,5 +1,6 @@
 # tplytics compare dashboard as a service. Settings in /etc/tplytics/compare.toml
-# (see scripts/compare.example.toml); code in /opt/tplytics.
+# (see scripts/compare.example.toml); code in /opt/tplytics. The long-term chart is
+# kept in /var/lib/tplytics (history_file in the config).
 [Unit]
 Description=tplytics compare dashboard
 After=network-online.target
@@ -9,6 +10,7 @@ Wants=network-online.target
 Type=simple
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /opt/tplytics/tplytics.py compare --config /etc/tplytics/compare.toml
+StateDirectory=tplytics
 Restart=always
 RestartSec=10
 NoNewPrivileges=yes

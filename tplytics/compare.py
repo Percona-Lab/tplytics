@@ -178,6 +178,97 @@ class PairStats:
         return math.exp(self.logsum / self.n) if self.n else None
 
 
+# ============================================================ long-term log
+class PassLog:
+    """Geometric mean per target of every full pass over the queries, kept on disk.
+
+    A pass is one run of every query (Q01..Qnn in sequential order). Its point
+    is the geometric mean of the pass's execution times per target; a timeout
+    counts as the timeout (a lower bound), errors and unsupported queries are
+    left out and counted. Points are appended to a JSON-lines file, so the
+    chart survives restarts; points older than --keep-hours are dropped.
+    """
+
+    def __init__(self, path, keep_hours, timeout, n_queries):
+        self.path, self.keep, self.timeout, self.n = path, keep_hours * 3600, timeout, n_queries
+        self.points = []
+        self.cur = None
+        self.lock = threading.Lock()
+        self.version = 0
+        if path:
+            self._load()
+
+    def _load(self):
+        cutoff = time.time() - self.keep
+        try:
+            with open(self.path) as fh:
+                for line in fh:
+                    try:
+                        p = json.loads(line)
+                    except ValueError:
+                        continue                  # a line cut by a crash
+                    if p.get("t", 0) >= cutoff:
+                        self.points.append(p)
+        except FileNotFoundError:
+            pass
+        self._rewrite()                           # drop what aged out
+
+    def _rewrite(self):
+        if not self.path:
+            return
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        tmp = self.path + ".tmp"
+        with open(tmp, "w") as fh:
+            for p in self.points:
+                fh.write(json.dumps(p, separators=(",", ":")) + "\n")
+        os.replace(tmp, self.path)
+
+    def add_round(self, results, now):
+        """Count one finished round; close the pass after n rounds."""
+        if self.cur is None:
+            self.cur = {"start": now, "rounds": 0, "t": {}}
+        self.cur["rounds"] += 1
+        for label, r in results.items():
+            acc = self.cur["t"].setdefault(label, {"logsum": 0.0, "n": 0, "errors": 0, "timeouts": 0})
+            st = r.get("status")
+            if st == OK:
+                acc["logsum"] += math.log(max(r["elapsed"], 1e-4))
+                acc["n"] += 1
+            elif st == TIMEOUT:
+                acc["logsum"] += math.log(self.timeout)
+                acc["n"] += 1
+                acc["timeouts"] += 1
+            elif st != "unsupported":
+                acc["errors"] += 1
+        if self.cur["rounds"] >= self.n:
+            self._close(now)
+
+    def _close(self, now):
+        cur, self.cur = self.cur, None
+        point = {"t": round(now, 1), "start": round(cur["start"], 1), "queries": cur["rounds"], "targets": {}}
+        for label, acc in cur["t"].items():
+            point["targets"][label] = {"geomean": round(math.exp(acc["logsum"] / acc["n"]), 4) if acc["n"] else None,
+                                       "n": acc["n"], "errors": acc["errors"], "timeouts": acc["timeouts"]}
+        with self.lock:
+            self.points.append(point)
+            cutoff = now - self.keep
+            aged = self.points and self.points[0]["t"] < cutoff
+            self.points = [p for p in self.points if p["t"] >= cutoff]
+            self.version += 1
+        if self.path:
+            if aged:
+                self._rewrite()
+            else:
+                with open(self.path, "a") as fh:
+                    fh.write(json.dumps(point, separators=(",", ":")) + "\n")
+
+    def snapshot(self):
+        with self.lock:
+            return {"version": self.version, "keep_hours": self.keep / 3600, "points": list(self.points),
+                    "in_progress": self.cur and {"start": self.cur["start"], "rounds": self.cur["rounds"]},
+                    "queries": self.n}
+
+
 # =================================================================== targets
 class Target:
     def __init__(self, opts, refresh):
@@ -286,6 +377,7 @@ class CompareLoop(threading.Thread):
         self.base = base
         self.pairs = {t.label: PairStats() for t in targets[1:]}
         self.pairs_q = {q.id: {t.label: PairStats() for t in targets[1:]} for q in self.queries}
+        self.passes = PassLog(args.history_file, args.keep_hours, args.timeout, len(self.queries))
 
     def _pick(self):
         if self.args.order == "weighted":
@@ -363,6 +455,10 @@ class CompareLoop(threading.Thread):
                         o["speedup"] = max(b["elapsed"], 1e-4) / max(o["elapsed"], 1e-4)
                 entry.update(state="done", finished=time.time())
                 self.next_start = max(started + a.interval, time.time() + a.min_display)
+            try:
+                self.passes.add_round(results, time.time())
+            except OSError as e:             # the chart is a bonus: never stop the board for it
+                print("cannot write %s: %s" % (self.passes.path, e), flush=True)
 
     def find_round(self, seq):
         """The current or a recent round by number, or None once it scrolled out."""
@@ -385,7 +481,10 @@ class CompareLoop(threading.Thread):
                     "next_start": self.next_start, "rounds": self.rounds,
                     "overall": {lbl: s.as_dict() for lbl, s in self.overall.items()},
                     "speedup": {lbl: {"ratio": p.ratio, "rounds": p.n} for lbl, p in self.pairs.items()},
-                    "base": self.base, "per_query": per_q}
+                    "base": self.base, "per_query": per_q,
+                    "passes_version": self.passes.version,
+                    "pass_in_progress": self.passes.cur and self.passes.cur["rounds"],
+                    "pass_queries": self.passes.n}
 
 
 def _copy_entry(e):
@@ -444,6 +543,8 @@ def make_handler(loop, targets, local, primary, args):
                     self._send(200, fh.read(), "text/html; charset=utf-8")
             elif self.path == "/api/state":
                 self._send(200, json.dumps(state(), default=str), "application/json")
+            elif self.path == "/api/passes":
+                self._send(200, json.dumps(loop.passes.snapshot()), "application/json")
             elif self.path.startswith("/sql?"):
                 self._sql()
             else:

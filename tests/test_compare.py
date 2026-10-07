@@ -93,5 +93,37 @@ class CompareTests(unittest.TestCase):
         self.assertAlmostEqual(p.ratio, math.sqrt(10))
 
 
+    def test_pass_log_persists_and_prunes(self):
+        import json as J
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "sub", "passes.jsonl")
+            log = C.PassLog(path, keep_hours=24, timeout=120.0, n_queries=2)
+            now = 1_000_000.0
+            log.add_round({"A": {"status": OK, "elapsed": 1.0}, "B": {"status": OK, "elapsed": 0.1}}, now)
+            self.assertEqual(log.snapshot()["points"], [])          # pass not complete yet
+            log.add_round({"A": {"status": OK, "elapsed": 4.0}, "B": {"status": ERROR, "elapsed": 0.0}}, now + 10)
+            pts = log.snapshot()["points"]
+            self.assertEqual(len(pts), 1)
+            self.assertAlmostEqual(pts[0]["targets"]["A"]["geomean"], 2.0)
+            self.assertAlmostEqual(pts[0]["targets"]["B"]["geomean"], 0.1)
+            self.assertEqual(pts[0]["targets"]["B"]["errors"], 1)
+            # a timeout counts as the timeout value
+            log.add_round({"A": {"status": TIMEOUT, "elapsed": 121.0}, "B": {"status": OK, "elapsed": 1.0}}, now + 20)
+            log.add_round({"A": {"status": OK, "elapsed": 1.2}, "B": {"status": "unsupported"}}, now + 30)
+            a = log.snapshot()["points"][1]["targets"]["A"]
+            self.assertAlmostEqual(a["geomean"], math.sqrt(120.0 * 1.2), places=3)
+            self.assertEqual(a["timeouts"], 1)
+            # a restart reloads the points; a cut last line is ignored
+            with open(path, "a") as fh:
+                fh.write('{"t": 12')
+            again = C.PassLog(path, keep_hours=24 * 365 * 100, timeout=120.0, n_queries=2)
+            self.assertEqual(len(again.snapshot()["points"]), 2)
+            # points older than keep_hours are dropped on load and from the file
+            old = C.PassLog(path, keep_hours=1, timeout=120.0, n_queries=2)
+            self.assertEqual(old.snapshot()["points"], [])
+            with open(path) as fh:
+                self.assertEqual([J.loads(x) for x in fh], [])
+
+
 if __name__ == "__main__":
     unittest.main()

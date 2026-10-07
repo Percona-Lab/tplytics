@@ -196,10 +196,14 @@ the statements and the data they read are the same. The page, sized to fill a
 * the target host's CPU, disk throughput and IOPS;
 * the current query's time, status and first rows;
 
-plus the primary host's load and transactions/s, the overall verdict (the
-geometric mean of the per-round time ratio over rounds where both targets
-succeeded), a per-query table of average times and ratios, and the latest
-rounds.
+plus the overall verdict (the geometric mean of the per-round time ratio over
+rounds where both targets succeeded), a per-query table of average times and
+ratios, the latest rounds (click an error to read it, or SQL to see the
+statement a target ran), the primary host's load, queries/s and
+transactions/s, and a long-term chart: the geometric mean of every full pass
+over the queries per target, for the last `keep_hours` (24 by default; a
+timeout counts as the timeout). With `history_file` set those points are
+appended to a JSON-lines file and reloaded after a restart.
 
 ```bash
 tplytics compare --config compare.toml          # http://127.0.0.1:8080/
