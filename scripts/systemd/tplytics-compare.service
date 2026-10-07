@@ -1,0 +1,20 @@
+# tplytics compare dashboard as a service. Settings in /etc/tplytics/compare.toml
+# (see scripts/compare.example.toml); code in /opt/tplytics.
+[Unit]
+Description=tplytics compare dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/tplytics/tplytics.py compare --config /etc/tplytics/compare.toml
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

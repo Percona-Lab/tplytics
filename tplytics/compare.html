@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tplytics compare</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0f0f0e; --surface-1: #191918; --surface-2: #212120; --text-primary: #ffffff; --text-secondary: #c3c2b7;
+  --muted: #8d8c85; --line: #2c2c2a; --grid: #2a2a28; --code: #141413;
+  --t0: #3987e5; --t1: #e8743b; --t2: #3cb371; --t3: #b47ee5;
+  --good: #3cb371; --warning: #e0a030; --critical: #ef6a6a; --accent: #3987e5;
+}
+@media (prefers-color-scheme: light) {
+  :root:where(:not([data-theme="dark"])) {
+    color-scheme: light;
+    --bg: #f2f3f5; --surface-1: #fcfcfb; --surface-2: #f5f5f2; --text-primary: #0b0b0b; --text-secondary: #52514e;
+    --muted: #7a7974; --line: #e1e0dc; --grid: #ebeae6; --code: #f3f3f0;
+    --t0: #2a78d6; --t1: #d95f22; --t2: #1a8a4a; --t3: #8a52c7;
+    --good: #1a8a4a; --warning: #b77900; --critical: #d03b3b; --accent: #2a78d6;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f3f5; --surface-1: #fcfcfb; --surface-2: #f5f5f2; --text-primary: #0b0b0b; --text-secondary: #52514e;
+  --muted: #7a7974; --line: #e1e0dc; --grid: #ebeae6; --code: #f3f3f0;
+  --t0: #2a78d6; --t1: #d95f22; --t2: #1a8a4a; --t3: #8a52c7;
+  --good: #1a8a4a; --warning: #b77900; --critical: #d03b3b; --accent: #2a78d6;
+}
+/* Sized for a big screen: everything scales with the viewport, so a 16:9
+   screen (1080p up to 4K) shows the whole board without scrolling. */
+html { font-size: clamp(11px, min(0.74vw, 1.32vh), 32px); }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary);
+       font: 1rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { padding: 0.8rem 1.2rem 1rem; }
+.board { display: grid; grid-template-columns: minmax(0, 2.05fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.main, .side { display: flex; flex-direction: column; gap: 0.8rem; min-width: 0; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.2rem; margin-bottom: 0.7rem; }
+header h1 { font-size: 1.6rem; margin: 0; font-weight: 750; }
+header .meta { color: var(--text-secondary); font-size: 0.95rem; flex: 1 1 30rem; }
+button { font: inherit; font-weight: 650; border: 1px solid var(--line); background: var(--surface-1);
+         color: var(--text-primary); padding: 0.45rem 1.1rem; border-radius: 0.5rem; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pill { font-size: 0.9rem; padding: 0.2rem 0.75rem; border-radius: 99px; border: 1px solid var(--line); color: var(--text-secondary); }
+.card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 0.8rem; min-width: 0; }
+.k { font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .06em; font-weight: 650; }
+.num { font-variant-numeric: tabular-nums; }
+.good { color: var(--good); } .warn { color: var(--warning); } .crit { color: var(--critical); } .dim { color: var(--muted); }
+
+/* ---- top strip: primary + comparison ---- */
+.primary-card { padding: 0.6rem 0.8rem; display: grid; grid-template-columns: 12rem repeat(3, minmax(0, 1fr)); gap: 0.8rem; align-items: stretch; }
+.primary-card .who .name { font-size: 1.1rem; font-weight: 700; margin-top: 0.2rem; line-height: 1.25; }
+.primary-card .who .sub { color: var(--text-secondary); font-size: 0.9rem; }
+.verdict { padding: 0.9rem 1.1rem; display: flex; flex-direction: column; justify-content: center; }
+.verdict .big { font-size: 2.4rem; font-weight: 800; line-height: 1.1; margin-top: 0.2rem; }
+.verdict .sub { color: var(--text-secondary); font-size: 0.95rem; margin-top: 0.2rem; }
+
+/* ---- target columns ---- */
+.cols { display: grid; gap: 0.8rem; }
+.tcol { display: flex; flex-direction: column; gap: 0.8rem; min-width: 0; }
+.thead { padding: 0.7rem 1rem; border-top: 0.35rem solid var(--tc); display: flex; align-items: baseline; gap: 0.4rem 1rem; flex-wrap: wrap; }
+.thead .name { font-size: 1.7rem; font-weight: 800; color: var(--tc); white-space: nowrap; flex-shrink: 0; }
+.thead { flex-wrap: nowrap; }
+.thead .sub { color: var(--text-secondary); font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; }
+.kpi { padding: 0.7rem 1rem; min-width: 0; }
+.kpi .k, .load .k { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.kpi .v { font-size: 3rem; font-weight: 800; line-height: 1.1; margin-top: 0.15rem; }
+.kpi .v small { font-size: 1.3rem; font-weight: 600; color: var(--text-secondary); margin-left: 0.2rem; }
+.kpi .s { font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.15rem; min-height: 1.3em;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.loads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; }
+.load { padding: 0.6rem 0.9rem 0.5rem; position: relative; }
+.load .row { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.load .v { font-size: 1.6rem; font-weight: 750; }
+.load .v small { font-size: 0.9rem; color: var(--text-secondary); font-weight: 500; margin-left: 0.15rem; }
+.load .s { font-size: 0.85rem; color: var(--text-secondary); min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spark { display: block; width: 100%; height: 3.2rem; margin-top: 0.3rem; overflow: visible; }
+.spark .grid { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark path.line { fill: none; stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.spark path.area { opacity: .14; stroke: none; }
+.legend { font-size: 0.8rem; color: var(--text-secondary); }
+.legend i { display: inline-block; width: 0.7rem; height: 0.2rem; border-radius: 2px; vertical-align: middle; margin: 0 0.25rem 0 0.5rem; }
+
+/* ---- current round ---- */
+.round { padding: 0.7rem 1rem; }
+.round-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.3rem 1rem; }
+.round-head .qid { font-size: 2rem; font-weight: 800; }
+.round-head .qname { font-size: 1.6rem; font-weight: 650; }
+.round-head .right { margin-left: auto; display: flex; gap: 0.6rem; align-items: center; }
+.round .desc { color: var(--text-secondary); margin: 0.25rem 0 0; font-size: 0.95rem; max-width: 120rem;
+               display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.round .params { color: var(--muted); font-size: 0.9rem; margin-top: 0.3rem; }
+.state { display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 650; font-size: 0.95rem; padding: 0.2rem 0.8rem;
+         border-radius: 99px; border: 1px solid var(--line); }
+.state .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--accent); }
+.state.running .dot { animation: pulse 1s infinite; }
+.state.done .dot { background: var(--muted); }
+@keyframes pulse { 50% { opacity: .2; } }
+.res { padding: 0.6rem 0.9rem; border-left: 0.35rem solid var(--tc); min-height: 10.6rem; }
+.res .top { display: flex; align-items: baseline; gap: 1.2rem; flex-wrap: wrap; }
+.res .time { font-size: 3rem; font-weight: 800; line-height: 1.05; }
+.res .meta2 { color: var(--text-secondary); font-size: 1rem; }
+.res .winner { font-size: 1rem; font-weight: 750; padding: 0.15rem 0.7rem; border-radius: 99px; background: var(--tc); color: #fff; }
+.bar { height: 0.5rem; border-radius: 99px; background: var(--grid); margin: 0.6rem 0 0.4rem; overflow: hidden; }
+.bar > div { height: 100%; background: var(--tc); border-radius: 99px; transition: width .4s; }
+.status { font-weight: 700; }
+.status.ok { color: var(--good); } .status.error, .status.unsupported { color: var(--critical); } .status.timeout { color: var(--warning); }
+.result { overflow: hidden; margin-top: 0.3rem; max-height: 5.7rem; }
+.result table { border-collapse: collapse; font-size: 0.85rem; width: 100%; }
+.result th, .result td { padding: 0.2rem 0.6rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.result th { color: var(--text-secondary); font-weight: 600; }
+.result td.n { text-align: right; font-variant-numeric: tabular-nums; }
+pre.err { color: var(--critical); white-space: pre-wrap; font: 0.85rem/1.4 ui-monospace, Menlo, Consolas, monospace; margin: 0.5rem 0 0; }
+
+/* ---- bottom: per query + recent rounds ---- */
+
+.card h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin: 0;
+           padding: 0.7rem 1rem 0.5rem; font-weight: 700; }
+table.t { border-collapse: collapse; width: 100%; font-size: 0.95rem; table-layout: fixed; }
+table.t col.w-id { width: 3.6rem; } table.t col.w-n { width: 4.6rem; } table.t col.w-t { width: 7.6rem; } table.t col.w-r { width: 9.5rem; }
+table.t th { white-space: normal; line-height: 1.2; vertical-align: bottom; }
+table.t col.w-seq { width: 3rem; } table.t col.w-clock { width: 6rem; }
+table.t th, table.t td { padding: 0.28rem 0.7rem; border-top: 1px solid var(--line); white-space: nowrap; }
+table.t th { color: var(--text-secondary); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: .04em; text-align: left; }
+table.t td.n, table.t th.n { text-align: right; font-variant-numeric: tabular-nums; }
+table.t td.qn, table.t td.ql { overflow: hidden; text-overflow: ellipsis; }
+table.t tr.now td { background: var(--surface-2); }
+.sbar { display: inline-block; height: 0.55rem; border-radius: 99px; vertical-align: middle; margin-left: 0.4rem; }
+tr.fresh { animation: slidein .6s ease-out; }
+@keyframes slidein { from { opacity: 0; transform: translateY(-0.4rem); } to { opacity: 1; } }
+.empty { color: var(--muted); padding: 1rem; }
+@media (max-width: 1300px) {
+  html { font-size: 13px; }
+  .board, .primary-card { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 800px) {
+  .kpis, .loads, .cols { grid-template-columns: minmax(0, 1fr) !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="title">tplytics compare</h1>
+    <div class="meta" id="meta">connecting…</div>
+    <span class="pill" id="pill">–</span>
+    <button id="toggle" class="primary">Pause</button>
+  </header>
+
+  <div class="board">
+    <div class="main">
+      <div class="card primary-card" id="primary"></div>
+      <div class="cols" id="cols"></div>
+      <div class="card round" id="round"><div class="empty">Waiting for the first query…</div></div>
+      <div class="cols" id="results"></div>
+      <div class="card"><h2 id="recentTitle">Recent rounds</h2><div id="recent"></div></div>
+    </div>
+    <div class="side">
+      <div class="card verdict" id="verdict"></div>
+      <div class="card"><h2>Per query: average time, all rounds so far</h2><div id="perq"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let S = null, built = 0, roundKey = null, shownSeqs = "";
+const TC = i => `var(--t${i % 4})`;
+const ICON = {ok: "✓", error: "✕", timeout: "⏱", unsupported: "–"};
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+function fmtT(s) {
+  if (s === null || s === undefined) return "–";
+  if (s < 1) return (s * 1000).toFixed(s < 0.01 ? 1 : 0) + " ms";
+  if (s < 100) return s.toFixed(2) + " s";
+  return s.toFixed(0) + " s";
+}
+function fmtTparts(s) {               // big numbers: value and unit separately
+  if (s === null || s === undefined) return ["–", ""];
+  if (s < 1) return [(s * 1000).toFixed(s < 0.01 ? 1 : 0), "ms"];
+  if (s < 100) return [s.toFixed(2), "s"];
+  return [s.toFixed(0), "s"];
+}
+function fmtLag(s) {
+  if (s === null || s === undefined) return ["–", ""];
+  if (s < 60) return [s.toFixed(1), "s"];
+  if (s < 3600) return [Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0"), "min"];
+  return [(s / 3600).toFixed(1), "h"];
+}
+function lagClass(s) { return s === null || s === undefined ? "dim" : s <= 10 ? "good" : s <= 600 ? "warn" : "crit"; }
+function fmtN(v, d) { return v === null || v === undefined ? "–" : Number(v).toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}); }
+function clock(t) { return new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}); }
+function isNum(v) { return /^-?\d+(\.\d+)?$/.test(v); }
+function xFaster(r) { return r === null || r === undefined ? "–" : r >= 1 ? r.toFixed(r >= 10 ? 0 : 1) + "×" : (1 / r).toFixed(1 / r >= 10 ? 0 : 1) + "× slower"; }
+
+/* ---------- sparklines ---------- */
+function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
+function spark(pts, series, max) {
+  const W = 300, H = 50;
+  pts = pts.filter(p => p[series[0].f] !== undefined);
+  if (pts.length < 2) return "";
+  const ymax = max || niceMax(Math.max(...pts.flatMap(p => series.map(s => p[s.f] || 0))) * 1.1);
+  const X = i => (i + (180 - pts.length)) / 179 * W, Y = v => H - 2 - Math.min(v, ymax) / ymax * (H - 4);
+  let h = `<line class="grid" x1="0" x2="${W}" y1="${H - 1}" y2="${H - 1}"/><line class="grid" x1="0" x2="${W}" y1="${Y(ymax / 2)}" y2="${Y(ymax / 2)}"/>`;
+  series.forEach((s, k) => {
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p[s.f] || 0).toFixed(1)}`).join("");
+    if (series.length === 1) h += `<path class="area" style="fill:${s.c}" d="${line}L${X(pts.length - 1)},${H}L${X(0)},${H}Z"/>`;
+    h += `<path class="line" style="stroke:${s.c}" d="${line}"/>`;
+  });
+  return h;
+}
+const LOADS = [
+  {key: "cpu", label: "CPU busy", unit: "%", max: 100, dec: 0, series: c => [{f: "cpu_busy", c}],
+   head: p => p.cpu_busy, sub: p => `I/O wait ${fmtN(p.cpu_iowait, 0)}%`},
+  {key: "disk", label: "Disk MB/s", unit: "MB/s", dec: 1, series: c => [{f: "read_mb", c}, {f: "write_mb", c: "var(--muted)"}],
+   head: p => (p.read_mb || 0) + (p.write_mb || 0), sub: p => `read ${fmtN(p.read_mb, 1)} · write ${fmtN(p.write_mb, 1)}`},
+  {key: "iops", label: "Disk IOPS", unit: "", dec: 0, series: c => [{f: "iops", c}], head: p => p.iops, sub: () => "reads + writes"},
+];
+const TPS = {key: "tps", label: "Primary tx/s", unit: "", dec: 0, series: c => [{f: "tps", c}], head: p => p.tps, sub: () => "commits + rollbacks (HammerDB)"};
+function loadTile(id, def) {
+  return `<div class="card load" id="${id}"><div class="row"><span class="k">${def.label}</span>
+</div>
+    <div class="v num">–</div><div class="s"></div><svg class="spark" viewBox="0 0 300 50" preserveAspectRatio="none"></svg></div>`;
+}
+function drawLoad(id, def, series, enabled, color, why) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const v = el.querySelector(".v"), s = el.querySelector(".s"), svg = el.querySelector("svg");
+  if (!enabled || !series || !series.length) { v.innerHTML = "–"; s.textContent = why; svg.innerHTML = ""; return; }
+  const last = series[series.length - 1];
+  v.innerHTML = `${fmtN(def.head(last), def.dec)}${def.unit ? `<small>${def.unit}</small>` : ""}`;
+  s.textContent = def.sub(last);
+  el.style.color = "";
+  svg.innerHTML = spark(series, def.series(color), def.max);
+}
+
+/* ---------- layout ---------- */
+function build() {
+  const n = S.targets.length;
+  document.getElementById("cols").style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+  document.getElementById("results").style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+  document.getElementById("cols").innerHTML = S.targets.map((t, i) => `<div class="tcol" style="--tc:${TC(i)}">
+      <div class="card thead"><span class="name">${esc(t.label)}</span><span class="sub" id="tsub${i}"></span></div>
+      <div class="kpis">
+        <div class="card kpi"><div class="k">Replication lag</div><div class="v num" id="lag${i}">–</div><div class="s" id="lags${i}"></div></div>
+        <div class="card kpi"><div class="k">Geomean so far</div><div class="v num" id="geo${i}">–</div><div class="s" id="geos${i}"></div></div>
+        <div class="card kpi"><div class="k">Executions</div><div class="v num" id="exe${i}">–</div><div class="s" id="exes${i}"></div></div>
+      </div>
+      <div class="loads">${LOADS.map(d => loadTile(`l${i}-${d.key}`, d)).join("")}</div>
+    </div>`).join("");
+  document.getElementById("primary").innerHTML = `<div class="who"><div class="k">Primary · HammerDB</div>
+      <div class="name" id="pname"></div><div class="sub" id="psub"></div></div>
+    ${loadTile("p-cpu", LOADS[0])}${loadTile("p-disk", LOADS[1])}${loadTile("p-tps", TPS)}`;
+  built = n;
+}
+
+function render() {
+  if (built !== S.targets.length) build();
+  document.getElementById("title").textContent = S.title;
+  document.title = S.title;
+  document.getElementById("meta").textContent = `${S.database} · same query and parameters on every target, data window ${S.common_window} · ` +
+    `${S.rounds} rounds · one round at most every ${S.interval}s · timeout ${S.timeout}s`;
+  const pill = document.getElementById("pill"), b = document.getElementById("toggle");
+  pill.textContent = S.running ? "running" : (S.current && S.current.state === "running" ? "pausing after this round" : "paused");
+  b.textContent = S.running ? "Pause" : "Resume";
+  b.className = S.running ? "" : "primary";
+
+  /* primary */
+  const L = S.local;
+  document.getElementById("pname").textContent = L.label;
+  document.getElementById("psub").textContent = `${L.host} · ${L.cpus} CPUs`;
+  drawLoad("p-cpu", LOADS[0], L.series, L.system_stats, "var(--accent)", "not available");
+  drawLoad("p-disk", LOADS[1], L.series, L.system_stats, "var(--accent)", "not available");
+  drawLoad("p-tps", TPS, L.series, L.db_stats, "var(--accent)", "no [primary] in the config");
+
+  /* verdict */
+  const v = document.getElementById("verdict"), others = S.targets.slice(1);
+  v.innerHTML = others.map((t, k) => {
+    const sp = S.speedup[t.label] || {}, i = k + 1;
+    if (!sp.ratio) return `<div class="k">${esc(t.label)} vs ${esc(S.base)}</div><div class="big dim">–</div><div class="sub">needs a round where both succeed</div>`;
+    const faster = sp.ratio >= 1, r = faster ? sp.ratio : 1 / sp.ratio;
+    const who = faster ? t.label : S.base, ci = faster ? i : 0;
+    return `<div class="k">Same queries, geometric mean of ${sp.rounds} paired rounds</div>
+      <div class="big num"><span style="color:${TC(ci)}">${esc(who)}</span> is ${r.toFixed(r >= 10 ? 0 : 1)}× faster</div>
+      <div class="sub">than ${esc(faster ? S.base : t.label)} · per-round time ratio ${esc(S.base)} ÷ ${esc(t.label)}</div>`;
+  }).join("");
+
+  /* targets */
+  S.targets.forEach((t, i) => {
+    document.getElementById("tsub" + i).textContent = `${t.server_version} · ${t.host || t.target}${t.cpus ? " · " + t.cpus + " CPUs" : ""} · data to ${t.data_to}`;
+    const [lv, lu] = fmtLag(t.lag), lagEl = document.getElementById("lag" + i);
+    lagEl.className = "v num " + lagClass(t.lag);
+    lagEl.innerHTML = t.lag === null || t.lag === undefined ? "–" : `${lv}<small>${lu}</small>`;
+    const ls = t.lag_stats && t.lag_stats["5m"];
+    document.getElementById("lags" + i).textContent = t.lag_state === "ok"
+      ? (ls ? `heartbeat · 5 min max ${fmtLag(ls.max).join(" ")}` : "heartbeat")
+      : (t.lag_state || "") + (t.lag_error ? ": " + t.lag_error.slice(0, 60) : "");
+    const o = S.overall[t.label] || {}, [gv, gu] = fmtTparts(o.geomean);
+    document.getElementById("geo" + i).innerHTML = o.geomean ? `${gv}<small>${gu}</small>` : "–";
+    document.getElementById("geos" + i).textContent = o.ok ? `${o.ok} successful executions · avg ${fmtT(o.avg)}` : "no successful execution yet";
+    document.getElementById("exe" + i).textContent = fmtN(o.runs || 0, 0);
+    const exs = document.getElementById("exes" + i);
+    exs.innerHTML = `<span class="good">${o.ok || 0} ok</span> · <span class="${o.errors ? "crit" : ""}">${o.errors || 0} errors</span> · <span class="${o.timeouts ? "warn" : ""}">${o.timeouts || 0} timeouts</span>`;
+    LOADS.forEach(d => drawLoad(`l${i}-${d.key}`, d, t.series, t.system_stats, TC(i), t.status_url === null ? "no status_url" : "not reported"));
+  });
+
+  renderRound();
+  renderPerQuery();
+  renderRecent();
+}
+
+/* ---------- current round ---------- */
+function renderRound() {
+  const e = S.current, el = document.getElementById("round"), rs = document.getElementById("results");
+  if (!e) return;
+  const key = e.seq;
+  if (key !== roundKey) {
+    roundKey = key;
+    el.innerHTML = `<div class="round-head"><span class="qid">${e.id}</span><span class="qname">${esc(e.name)}</span>
+        <span class="right"><span class="pill">round #${e.seq} · complexity ${e.complexity} · ${esc(e.tables.join(", "))}</span>
+        <span class="state" id="rstate"><span class="dot"></span><span id="rtext"></span></span></span></div>
+      <p class="desc">${esc(e.description).replace(/\n/g, " ")}</p><div class="params">Parameters: ${esc(e.params || "none")}</div>`;
+    rs.innerHTML = S.targets.map((t, i) => `<div class="card res" style="--tc:${TC(i)}" id="res${i}"></div>`).join("");
+  }
+  const st = document.getElementById("rstate"), tx = document.getElementById("rtext");
+  st.className = "state " + e.state;
+  if (e.state === "running") tx.textContent = "running";
+  else if (!S.running) tx.textContent = "done · paused";
+  else { const left = S.next_start ? Math.max(0, Math.ceil(S.next_start - S.now)) : 0; tx.textContent = left ? `done · next query in ${left}s` : "done"; }
+
+  const times = S.targets.map(t => { const r = e.results[t.label]; return r.state === "running" ? S.now - r.started : r.elapsed; });
+  const ok = S.targets.map(t => e.results[t.label].status === "ok");
+  const maxT = Math.max(0.001, ...times.filter(x => x !== null && x !== undefined));
+  const doneOk = S.targets.map((t, i) => e.results[t.label].state === "done" && ok[i] ? times[i] : null);
+  const best = doneOk.every(x => x !== null) && doneOk.length > 1 ? doneOk.indexOf(Math.min(...doneOk)) : -1;
+  S.targets.forEach((t, i) => {
+    const r = e.results[t.label], box = document.getElementById("res" + i);
+    const running = r.state === "running", [tv, tu] = fmtTparts(times[i]);
+    let h = `<div class="top"><span class="time num">${tv}<small style="font-size:1.4rem;color:var(--text-secondary);margin-left:.2rem">${tu}</small></span>
+      <span class="meta2">${running ? "running…" : `<span class="status ${r.status}">${ICON[r.status] || "•"} ${r.status}</span> · ${fmtN(r.rows, 0)} rows · this query's avg ${fmtT(r.avg)}`}</span>
+      ${i === best ? `<span class="winner">${r.speedup ? xFaster(r.speedup) + " faster" : "fastest"}</span>` : ""}</div>
+      <div class="bar"><div style="width:${times[i] ? Math.max(1, 100 * times[i] / maxT) : 0}%"></div></div>`;
+    if (!running) {
+      if (r.error) h += `<pre class="err">${esc(r.error)}</pre>`;
+      else if (r.columns && r.columns.length && r.rows) h += `<div class="result"><table><tr>${r.columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr>${
+        r.data.map(row => `<tr>${row.map(v => `<td class="${isNum(v) ? "n" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</table></div>`;
+    }
+    box.innerHTML = h;
+  });
+}
+
+/* ---------- per query table ---------- */
+function renderPerQuery() {
+  const T = S.targets, base = S.base, other = T.length > 1 ? T[1].label : null;
+  const cur = S.current ? S.current.id : null;
+  const maxR = Math.max(1, ...S.per_query.map(q => other && q.speedup[other] ? Math.log10(Math.max(q.speedup[other], 1)) : 0));
+  let h = `<table class="t"><colgroup><col class="w-id"><col><col class="w-n">${T.map(() => `<col class="w-t">`).join("")}${other ? `<col class="w-r">` : ""}</colgroup>
+    <tr><th>Q</th><th>Query</th><th class="n">Runs</th>${T.map((t, i) => `<th class="n" style="color:${TC(i)}">${esc(t.label)}</th>`).join("")}${
+    other ? `<th title="${esc(other)} vs ${esc(base)}">${esc(other)} is</th>` : ""}</tr>`;
+  S.per_query.forEach(q => {
+    const runs = Math.max(...T.map(t => q.stats[t.label].runs));
+    h += `<tr class="${q.id === cur ? "now" : ""}"><td><b>${q.id}</b></td><td class="qn">${esc(q.name)}</td><td class="n">${runs}</td>`;
+    T.forEach(t => {
+      const s = q.stats[t.label];
+      h += `<td class="n">${!q.supported[t.label] ? '<span class="dim">n/a</span>' : s.ok ? fmtT(s.avg) : s.runs ? `<span class="crit">${s.errors ? "error" : "timeout"}</span>` : "–"}</td>`;
+    });
+    if (other) {
+      const r = q.speedup[other];
+      h += `<td class="num">${r ? `${xFaster(r)}<span class="sbar" style="width:${r >= 1 ? 0.4 + 3.6 * Math.log10(r) / maxR : 0.4}rem;background:${r >= 1 ? TC(1) : TC(0)}"></span>` : "–"}</td>`;
+    }
+    h += "</tr>";
+  });
+  document.getElementById("perq").innerHTML = h + "</table>";
+}
+
+/* ---------- recent rounds ---------- */
+function renderRecent() {
+  const hist = (S.history || []).slice(0, 4), T = S.targets;
+  document.getElementById("recentTitle").textContent = hist.length ? `Recent rounds (last ${hist.length})` : "Recent rounds";
+  const seqs = hist.map(h => h.seq).join();
+  if (seqs === shownSeqs) return;
+  const fresh = new Set(hist.map(h => h.seq).filter(s => !shownSeqs.split(",").includes(String(s))));
+  let h = `<table class="t"><colgroup><col class="w-seq"><col class="w-clock"><col>${T.map(() => `<col class="w-r">`).join("")}${T.length > 1 ? `<col class="w-r">` : ""}</colgroup>
+    <tr><th class="n">#</th><th>Time</th><th>Query</th>${T.map((t, i) => `<th class="n" style="color:${TC(i)}">${esc(t.label)}</th>`).join("")}${
+    T.length > 1 ? `<th class="n">Ratio</th>` : ""}</tr>`;
+  hist.forEach(e => {
+    h += `<tr class="${fresh.has(e.seq) && shownSeqs ? "fresh" : ""}"><td class="n dim">${e.seq}</td><td class="num dim">${clock(e.finished)}</td><td class="ql"><b>${e.id}</b> ${esc(e.name)}</td>`;
+    T.forEach(t => { const r = e.results[t.label]; h += `<td class="n">${r.status === "ok" ? fmtT(r.elapsed) : `<span class="status ${r.status}">${ICON[r.status] || ""} ${r.status}</span>`}</td>`; });
+    if (T.length > 1) { const sp = e.results[T[1].label].speedup; h += `<td class="n">${sp ? xFaster(sp) : "–"}</td>`; }
+    h += "</tr>";
+  });
+  document.getElementById("recent").innerHTML = hist.length ? h + "</table>" : `<div class="empty">Finished rounds appear here, newest first.</div>`;
+  shownSeqs = seqs;
+}
+
+async function poll() {
+  try {
+    const r = await fetch("api/state");
+    S = await r.json();
+    render();
+  } catch (e) {
+    document.getElementById("pill").textContent = "disconnected";
+  }
+  setTimeout(poll, 1000);
+}
+document.getElementById("toggle").onclick = async () => {
+  await fetch(S && S.running ? "api/pause" : "api/resume", {method: "POST"});
+};
+poll();
+</script>
+</body>
+</html>

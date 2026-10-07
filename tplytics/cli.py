@@ -185,12 +185,43 @@ def build_parser():
                    help="monitor: JSON file rewritten after every read")
     g.add_argument("--http-port", type=int, default=0, help="monitor: serve the status JSON on this port")
     g.add_argument("--listen", default="127.0.0.1", help="monitor: address for --http-port (default 127.0.0.1)")
+    g.add_argument("--system-stats", action="store_true",
+                   help="monitor: also serve this host's CPU and disk load on /api/system (for tplytics compare)")
     g.add_argument("--skew", type=float, default=None,
                    help="monitor: read this many seconds after each write tick (default: half the interval)")
     g.add_argument("--max-lag", type=float, default=None,
                    help="check: lag in seconds above which the exit code is 1 (monitor: reported only)")
     g.add_argument("--verbose", "-v", action="store_true", help="monitor: print every read")
     p.set_defaults(func=run_heartbeat, mode=None)
+
+    p = sub.add_parser("compare", formatter_class=argparse.RawDescriptionHelpFormatter,
+                       help="side-by-side dashboard: the same queries on several targets (e.g. replica vs DBTrail)",
+                       description="Runs every query, with the same parameters, on all targets of --config at "
+                                   "the same time and shows them next to each other in the browser, with "
+                                   "replication lag, the geometric mean of all executions and host load. "
+                                   "See tplytics/compare.py for the config file format.")
+    p.add_argument("--config", required=True, metavar="FILE", help="TOML file with [[target]] tables")
+    add_query_options(p, need_db=False)
+    g = p.add_argument_group("dashboard")
+    g.add_argument("--title", default="tplytics compare", help="page title")
+    g.add_argument("--listen", default="127.0.0.1", help="address to listen on (default 127.0.0.1)")
+    g.add_argument("--http-port", type=int, default=8080, help="HTTP port (default 8080)")
+    g.add_argument("--interval", type=float, default=10.0, help="minimum seconds between round starts (default 10)")
+    g.add_argument("--min-display", type=float, default=5.0,
+                   help="minimum seconds a finished round stays the current one (default 5)")
+    g.add_argument("--order", choices=["sequential", "weighted"], default="sequential",
+                   help="sequential: Q01, Q02, ... in turn; weighted: random by concurrent weight")
+    g.add_argument("--timeout", "-t", type=float, default=120.0, help="query timeout in seconds (default 120)")
+    g.add_argument("--seed", type=int, default=None, help="random seed for parameter choices")
+    g.add_argument("--history", type=int, default=12, help="finished rounds listed (default 12)")
+    g.add_argument("--show-rows", type=int, default=5, help="result rows kept per target (default 5)")
+    g.add_argument("--start-paused", action="store_true", help="wait for Resume in the browser")
+    g.add_argument("--refresh", type=float, default=60,
+                   help="seconds between re-reading each target's size and time range (default 60)")
+    g.add_argument("--system-stats", choices=["auto", "off"], default="auto",
+                   help="CPU and disk load of this host (auto: on Linux)")
+    p.set_defaults(func=run_compare, mode=None,
+                   defaults={a.dest: a.default for a in p._actions if a.dest != "help"})
 
     p = sub.add_parser("info", help="show what the benchmark discovers about the database")
     add_common(p)
@@ -210,6 +241,11 @@ def build_parser():
 def run_heartbeat(args):
     from .heartbeat import heartbeat
     return heartbeat(args)
+
+
+def run_compare(args):
+    from .compare import compare
+    return compare(args)
 
 
 def run_dashboard(ctx):
@@ -298,7 +334,7 @@ def cmd_sql(args):
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    if args.func in (cmd_list, cmd_info, cmd_sql, run_heartbeat):
+    if args.func in (cmd_list, cmd_info, cmd_sql, run_heartbeat, run_compare):
         return args.func(args)
     if args.timeout <= 0:
         raise SystemExit("--timeout must be positive")

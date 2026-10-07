@@ -59,7 +59,7 @@ def _read_disk(disks):
 
 
 class Sampler(threading.Thread):
-    """Samples CPU, disk and database activity once a second."""
+    """Samples CPU, disk and database activity once a second (engine None: system only)."""
 
     def __init__(self, engine, system_stats):
         super().__init__(daemon=True, name="sampler")
@@ -68,7 +68,7 @@ class Sampler(threading.Thread):
         self.disks = _disks() if self.system else set()
         self.series = collections.deque(maxlen=SERIES_POINTS)
         self.lock = threading.Lock()
-        self.db_enabled = engine.activity_sql is not None
+        self.db_enabled = engine is not None and engine.activity_sql is not None
 
     def run(self):
         session = None

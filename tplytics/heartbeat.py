@@ -244,15 +244,21 @@ def _fmt(x):
     return "-" if x is None else "%.3fs" % x
 
 
-def serve_http(monitor, listen, port):
+def serve_http(monitor, listen, port, sampler=None):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
-            if self.path.split("?")[0] not in ("/", "/api/heartbeat"):
+            path = self.path.split("?")[0]
+            if path in ("/", "/api/heartbeat"):
+                doc = monitor.snapshot()
+            elif path == "/api/system" and sampler is not None:
+                doc = {"host": socket.gethostname(), "cpus": os.cpu_count(), "system_stats": sampler.system,
+                       "series": sampler.snapshot()}
+            else:
                 self.send_error(404)
                 return
-            body = json.dumps(monitor.snapshot(), indent=1).encode()
+            body = json.dumps(doc, indent=1).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -272,7 +278,14 @@ def run_monitor(args, engine):
     log("heartbeat monitor [%s]: %s table %s id %d every %gs"
         % (m.label, engine.describe(), m.table, args.id, args.interval))
     if args.http_port:
-        serve_http(m, args.listen, args.http_port)
+        sampler = None
+        if args.system_stats:
+            from .dashboard import Sampler
+            sampler = Sampler(None, True)
+            sampler.start()
+        serve_http(m, args.listen, args.http_port, sampler)
+        if sampler is not None:
+            log("serving this host's CPU and disk load on http://%s:%d/api/system" % (args.listen, args.http_port))
     skew = args.interval / 2 if args.skew is None else args.skew
     last_report, n = time.time(), 0
     tick = _next_tick(args.interval)

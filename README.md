@@ -181,6 +181,40 @@ Engines can supply a transactions counter by setting `activity_sql` in
 unless you pass `--listen`, so put it behind a firewall or an SSH tunnel when
 the database is not a test system.
 
+### compare (side by side, for a big screen)
+
+`compare` is the dashboard for several targets at once, typically a MySQL
+replica and the DBTrail copy of the same primary. Every round runs one query,
+with the same parameters, on all targets at the same time; the parameters are
+drawn from the data every target has (the overlap of their time ranges), so
+the statements and the data they read are the same. The page, sized to fill a
+16:9 screen from 1080p to 4K without scrolling, shows for each target:
+
+* **replication lag**, from the [heartbeat](#heartbeat-replication-lag);
+* the **geometric mean** of every successful execution so far, and the counts
+  of executions, errors and timeouts;
+* the target host's CPU, disk throughput and IOPS;
+* the current query's time, status and first rows;
+
+plus the primary host's load and transactions/s, the overall verdict (the
+geometric mean of the per-round time ratio over rounds where both targets
+succeeded), a per-query table of average times and ratios, and the latest
+rounds.
+
+```bash
+tplytics compare --config compare.toml          # http://127.0.0.1:8080/
+```
+
+Targets are described in a TOML file (see `scripts/compare.example.toml`):
+connection keys as on the command line (`engine`, `host`, `port`,
+`defaults_file`, ...), a `label`, and a `status_url`: a heartbeat monitor
+running on the target's host with `--http-port` and `--system-stats`, which
+serves the lag and the host load. Without `status_url` the lag is read from the
+heartbeat table through the target itself and host load is not shown. Keys under
+`[dashboard]` set compare's options (`listen`, `http_port`, `interval`,
+`timeout`, `title`, ...). `scripts/systemd/tplytics-compare.service` runs it as
+a service with `/etc/tplytics/compare.toml`.
+
 ### Other commands
 
 | command | what it does |
@@ -188,6 +222,7 @@ the database is not a test system.
 | `list` | queries, complexity, tables, weights, concurrent probability, and support per engine |
 | `info` | what the benchmark discovers about the database (size, time range) |
 | `sql [ids]` | print queries with freshly generated parameters, without running them |
+| `compare --config FILE` | side-by-side dashboard for several targets, see [compare](#compare-side-by-side-for-a-big-screen) |
 | `heartbeat update\|monitor\|check` | replication lag from a heartbeat row, see [Heartbeat](#heartbeat-replication-lag) |
 
 ## Heartbeat: replication lag
@@ -207,6 +242,8 @@ does, on any engine tplytics supports, including the DBTrail copy:
   read and, with `--http-port`, serves the same JSON on `/api/heartbeat`.
 * `check` reads once and exits 0 (lag at or under `--max-lag`), 1 (over) or
   2 (cannot be measured), for alerting.
+* With `--system-stats`, the monitor also serves its host's CPU and disk load on
+  `/api/system`, which is where `compare` gets each target's host load.
 
 ```bash
 tplytics heartbeat update  --defaults-file /etc/tplytics/primary.cnf

@@ -1,0 +1,32 @@
+# tplytics compare: the same queries on a MySQL replica and on DBTrail, side by side.
+#   tplytics compare --config compare.toml
+# Keys under [dashboard] are compare's command line options (listen, http_port,
+# interval, timeout, order, title, ...); the command line wins over them.
+
+[dashboard]
+title = "MySQL replica vs DBTrail"
+listen = "0.0.0.0"
+http_port = 8080
+interval = 10
+timeout = 120
+
+# Optional: the primary, for its transactions/s (any account that can connect).
+[primary]
+label = "Primary + HammerDB"
+engine = "mysql"
+defaults_file = "/etc/tplytics/primary-monitor.cnf"
+
+# The first target is the baseline the others are compared with.
+[[target]]
+label = "MySQL replica"
+engine = "mysql"
+defaults_file = "/etc/tplytics/replica.cnf"       # host, port, user, password
+# A heartbeat monitor on the replica host started with --http-port and
+# --system-stats: lag and host load come from it.
+status_url = "http://replica-host:8091"
+
+[[target]]
+label = "DBTrail"
+engine = "dbtrail"
+defaults_file = "/etc/tplytics/dbtrail.cnf"       # the DBTrail MySQL port
+status_url = "http://dbtrail-host:8091"
