@@ -150,8 +150,8 @@ serves a live web page:
   and the oldest drops off the bottom. Click a row for its description,
   parameters, result rows and SQL.
 
-At most one query starts every `--interval` seconds (5 by default), and every
-result stays the current query for at least `--min-display` seconds, so people
+At most one query starts every `--interval` seconds (10 by default), and every
+result stays the current query for at least `--min-display` seconds (5), so people
 have time to read it. **Pause** stops the loop after the current query, and
 **Resume** continues it. `--order weighted` picks queries at random by their
 concurrent weight instead of going through Q01..Q20 in turn.
