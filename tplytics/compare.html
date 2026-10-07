@@ -221,7 +221,8 @@ table.t tr.qrow:hover td { background: var(--surface-2); }
 }
 .legend .rd, .legend .wr { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 2px; vertical-align: middle; margin: 0 0.2rem 0 0.4rem; }
 .legend .rd { background: var(--rd); opacity: .75; } .legend .wr { background: var(--wr); opacity: .75; }
-.spark path.stk { stroke: none; opacity: .55; }
+.spark path.stk { stroke: none; opacity: .85; }
+.spark path.stkline { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; }
 </style>
 </head>
 <body>
@@ -311,7 +312,7 @@ function stackedSpark(pts, parts) {
     const above = pts.map((p, i) => below[i] + (p[s.f] || 0));
     const top = above.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
     const back = below.map((v, i) => `L${X(i).toFixed(1)},${Y(v).toFixed(1)}`).reverse().join("");
-    h += `<path class="stk" style="fill:${s.c}" d="${top}${back}Z"/><path class="line" style="stroke:${s.c}" d="${top}"/>`;
+    h += `<path class="stk" style="fill:${s.c}" d="${top}${back}Z"/><path class="stkline" style="stroke:${s.c}" d="${top}"/>`;
     below = above;
   });
   return h;
