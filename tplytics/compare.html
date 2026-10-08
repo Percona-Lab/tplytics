@@ -30,11 +30,11 @@
 }
 /* Sized for a big screen: everything scales with the viewport, so a 16:9
    screen (1080p up to 4K) shows the whole board without scrolling. */
-html { font-size: clamp(10px, min(0.74vw, 1.12vh), 32px); }
+html { font-size: clamp(10px, min(0.74vw, 1.095vh), 32px); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text-primary);
        font: 1rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-.wrap { padding: 0.8rem 1.2rem 1rem; }
+.wrap { padding: 0.7rem 1.2rem 0.6rem; }
 .board { display: grid; grid-template-columns: minmax(0, 2.05fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
 .main, .side { display: flex; flex-direction: column; gap: 0.8rem; min-width: 0; }
 header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.2rem; margin-bottom: 0.7rem; }
@@ -52,14 +52,16 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 /* ---- top strip: primary + comparison ---- */
 /* Two lines of two wide tiles: numbers on the left, the sparkline beside them. */
 .primary-card { padding: 0.5rem 0.8rem; display: grid; grid-template-columns: 10rem repeat(2, minmax(0, 1fr));
-                grid-template-rows: auto auto; gap: 0.35rem 0.8rem; align-items: stretch; margin-top: 0.8rem; padding: 0.4rem 0.8rem; }
-.primary-card .who { grid-row: 1 / span 2; align-self: center; }
+                grid-template-rows: auto auto auto; gap: 0.3rem 0.8rem; align-items: stretch; margin-top: 0.8rem; padding: 0.4rem 0.8rem; }
+.primary-card .who { grid-row: 1 / span 3; align-self: center; }
 .primary-card .load { padding: 0.2rem 0.8rem; display: grid; grid-template-columns: 12rem minmax(0, 1fr);
                       grid-template-rows: auto auto auto; column-gap: 1rem; align-items: center; }
 .primary-card .load > .row, .primary-card .load > .v, .primary-card .load > .s { grid-column: 1; }
 .primary-card .load .v { font-size: 1.2rem; line-height: 1.1; }
 .primary-card .load .s { font-size: 0.8rem; }
-.primary-card .spark { grid-column: 2; grid-row: 1 / span 3; height: 2.5rem; margin: 0; }
+.primary-card .spark { grid-column: 2; grid-row: 1 / span 3; height: 2.15rem; margin: 0; }
+.primary-card .legend { display: none; }   /* the colour keys are in the caption here */
+.load .s .sw { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 2px; margin: 0 0.2rem 0 0; opacity: .85; vertical-align: baseline; }
 .primary-card .who .name { font-size: 1.1rem; font-weight: 700; margin-top: 0.2rem; line-height: 1.25; }
 .primary-card .who .sub { color: var(--text-secondary); font-size: 0.9rem; }
 .verdict { padding: 0.9rem 1.1rem; display: flex; flex-direction: column; justify-content: center; }
@@ -112,7 +114,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .state.running .dot { animation: pulse 1s infinite; }
 .state.done .dot { background: var(--muted); }
 @keyframes pulse { 50% { opacity: .2; } }
-.res { padding: 0.6rem 0.9rem; border-left: 0.35rem solid var(--tc); min-height: 15rem; position: relative; }
+.res { padding: 0.6rem 0.9rem; border-left: 0.35rem solid var(--tc); min-height: 14.2rem; position: relative; }
 .res .top { padding-right: 15rem; }
 .res .corner { position: absolute; top: 0.7rem; right: 0.9rem; display: flex; gap: 0.5rem; align-items: center; }
 .sqllink { font-size: 0.9rem; font-weight: 650; color: var(--tc); text-decoration: none;
@@ -199,7 +201,7 @@ table.t tr.qrow:hover td { background: var(--surface-2); }
 .ltleg { display: flex; gap: 0.3rem 1.4rem; flex-wrap: wrap; font-size: 0.95rem; color: var(--text-secondary); }
 .ltleg i { display: inline-block; width: 1.2rem; height: 0.25rem; border-radius: 2px; vertical-align: middle; margin-right: 0.35rem; }
 .ltleg b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
-#ltsvg { display: block; width: 100%; height: 8.8rem; }
+#ltsvg { display: block; width: 100%; height: 5.8rem; }
 #ltsvg .ax { fill: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 #ltsvg .gl { stroke: var(--grid); stroke-width: 1; }
 #ltsvg .ln { fill: none; stroke-width: 2; stroke-linejoin: round; }
@@ -220,8 +222,7 @@ table.t tr.qrow:hover td { background: var(--surface-2); }
 @media (max-width: 640px) {
   .kpis, .loads, .cols, .primary-card { grid-template-columns: minmax(0, 1fr) !important; }
 }
-.legend .rd, .legend .wr { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 2px; vertical-align: middle; margin: 0 0.2rem 0 0.4rem; }
-.legend .rd { background: var(--rd); opacity: .75; } .legend .wr { background: var(--wr); opacity: .75; }
+.legend .sw { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 2px; vertical-align: middle; margin: 0 0.2rem 0 0.4rem; opacity: .85; }
 .spark path.stk { stroke: none; opacity: .85; }
 .spark path.stkline { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; }
 </style>
@@ -318,8 +319,10 @@ function stackedSpark(pts, parts) {
   });
   return h;
 }
-const RW_MB = [{f: "read_mb", c: "var(--rd)"}, {f: "write_mb", c: "var(--wr)"}];
-const RW_IOPS = [{f: "read_iops", c: "var(--rd)"}, {f: "write_iops", c: "var(--wr)"}];
+const RW_MB = [{f: "read_mb", c: "var(--rd)", name: "read"}, {f: "write_mb", c: "var(--wr)", name: "write"}];
+const RW_IOPS = [{f: "read_iops", c: "var(--rd)", name: "read"}, {f: "write_iops", c: "var(--wr)", name: "write"}];
+const ROW_CHANGES = [{f: "rows_inserted", c: "var(--good)", name: "ins"}, {f: "rows_updated", c: "var(--warning)", name: "upd"},
+                     {f: "rows_deleted", c: "var(--critical)", name: "del"}];
 const LOADS = [
   {key: "cpu", label: "CPU busy", unit: "%", max: 100, dec: 0, series: c => [{f: "cpu_busy", c}],
    head: p => p.cpu_busy, sub: p => `I/O wait ${fmtN(p.cpu_iowait, 0)}%`},
@@ -329,12 +332,20 @@ const LOADS = [
    head: p => p.iops, sub: p => p.read_iops === undefined ? "reads + writes" : `read ${fmtN(p.read_iops, 0)} · write ${fmtN(p.write_iops, 0)}`},
 ];
 const DISKIO = {key: "diskio", label: "Disk IOPS", unit: "", dec: 0, stack: RW_IOPS, head: p => p.iops,
-  sub: p => `read ${fmtN(p.read_iops, 0)} · write ${fmtN(p.write_iops, 0)} · ${fmtN((p.read_mb || 0) + (p.write_mb || 0), 1)} MB/s`};
+  sub: p => `read ${fmtN(p.read_iops, 0)} · write ${fmtN(p.write_iops, 0)} · ${fmtN((p.read_mb || 0) + (p.write_mb || 0), 1)} MB/s`,
+  subHtml: p => `<i class="sw" style="background:var(--rd)"></i>read ${fmtN(p.read_iops, 0)} · <i class="sw" style="background:var(--wr)"></i>write ${fmtN(p.write_iops, 0)} · ${fmtN((p.read_mb || 0) + (p.write_mb || 0), 1)} MB/s`};
 const TPS = {key: "tps", label: "MySQL tx/s", unit: "", dec: 0, series: c => [{f: "tps", c}], head: p => p.tps, sub: () => "commits + rollbacks"};
+const ROWS_READ = {key: "rows_read", label: "Rows read/s", unit: "", dec: 0, series: c => [{f: "rows_read", c}], head: p => p.rows_read,
+  sub: () => "rows read by all statements"};
+const swatch = c => `<i class="sw" style="background:${c}"></i>`;
+const ROWS_CHANGED = {key: "rows_changed", label: "Rows changed/s", unit: "", dec: 0, stack: ROW_CHANGES,
+  head: p => (p.rows_inserted || 0) + (p.rows_updated || 0) + (p.rows_deleted || 0),
+  sub: p => `ins ${fmtN(p.rows_inserted, 0)} · upd ${fmtN(p.rows_updated, 0)} · del ${fmtN(p.rows_deleted, 0)}`,
+  subHtml: p => `${swatch("var(--good)")}ins ${fmtN(p.rows_inserted, 0)} · ${swatch("var(--warning)")}upd ${fmtN(p.rows_updated, 0)} · ${swatch("var(--critical)")}del ${fmtN(p.rows_deleted, 0)}`};
 const QPS = {key: "qps", label: "MySQL QPS", unit: "", dec: 0, series: c => [{f: "qps", c}], head: p => p.qps, sub: () => "statements/s, all sessions"};
 function loadTile(id, def) {
   return `<div class="card load" id="${id}"><div class="row"><span class="k">${def.label}</span>
-    ${def.stack ? `<span class="legend"><i class="rd"></i>read<i class="wr"></i>write</span>` : ""}</div>
+    ${def.stack ? `<span class="legend">${def.stack.map(s => `<i class="sw" style="background:${s.c}"></i>${s.name}`).join("")}</span>` : ""}</div>
     <div class="v num">–</div><div class="s"></div><svg class="spark" viewBox="0 0 300 50" preserveAspectRatio="none"></svg></div>`;
 }
 function drawLoad(id, def, series, enabled, color, why) {
@@ -344,7 +355,7 @@ function drawLoad(id, def, series, enabled, color, why) {
   if (!enabled || !series || !series.length) { v.innerHTML = "–"; s.textContent = why; svg.innerHTML = ""; return; }
   const last = series[series.length - 1];
   v.innerHTML = `${fmtN(def.head(last), def.dec)}${def.unit ? `<small>${def.unit}</small>` : ""}`;
-  s.textContent = def.sub(last);
+  if (def.subHtml) s.innerHTML = def.subHtml(last); else s.textContent = def.sub(last);
   el.style.color = "";
   svg.innerHTML = def.stack && series.some(p => p[def.stack[0].f] !== undefined)
     ? stackedSpark(series, def.stack)
@@ -369,7 +380,8 @@ function build() {
   document.getElementById("primary").innerHTML = `<div class="who"><div class="k">Primary · HammerDB</div>
       <div class="name" id="pname"></div><div class="sub" id="psub"></div></div>
     ${loadTile("p-cpu", LOADS[0])}${loadTile("p-disk", DISKIO)}
-    ${loadTile("p-qps", QPS)}${loadTile("p-tps", TPS)}`;
+    ${loadTile("p-qps", QPS)}${loadTile("p-tps", TPS)}
+    ${loadTile("p-rread", ROWS_READ)}${loadTile("p-rchg", ROWS_CHANGED)}`;
   built = n;
 }
 
@@ -392,6 +404,8 @@ function render() {
   drawLoad("p-disk", DISKIO, L.series, L.system_stats, "var(--accent)", "not available");
   drawLoad("p-qps", QPS, L.series, L.qps_stats, "var(--accent)", "no [primary] in the config");
   drawLoad("p-tps", TPS, L.series, L.db_stats, "var(--accent)", "no [primary] in the config");
+  drawLoad("p-rread", ROWS_READ, L.series, L.rows_stats, "var(--accent)", "not available for this engine");
+  drawLoad("p-rchg", ROWS_CHANGED, L.series, L.rows_stats, "var(--accent)", "not available for this engine");
 
   /* verdict */
   const v = document.getElementById("verdict"), others = S.targets.slice(1);

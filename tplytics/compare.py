@@ -662,7 +662,7 @@ def make_handler(loop, targets, local, primary, args):
                                                 human_duration(common.span_seconds)),
             "local": {"label": primary.label if primary else socket.gethostname(),
                       "host": socket.gethostname(), "cpus": os.cpu_count(),
-                      "system_stats": local.system, "db_stats": local.db_enabled, "qps_stats": local.qps_enabled,
+                      "system_stats": local.system, "db_stats": local.db_enabled, "qps_stats": local.qps_enabled, "rows_stats": local.rows_enabled,
                       "series": local.snapshot()},
             "targets": [],
         })

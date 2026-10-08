@@ -70,6 +70,7 @@ class Sampler(threading.Thread):
         self.lock = threading.Lock()
         self.db_enabled = engine is not None and engine.activity_sql is not None
         self.qps_enabled = engine is not None and engine.queries_sql is not None
+        self.rows_enabled = engine is not None and engine.rows_sql is not None
 
     def run(self):
         session = None
@@ -90,6 +91,8 @@ class Sampler(threading.Thread):
                     cur["tx"] = self.engine.activity_counter(session)
                     if self.qps_enabled:
                         cur["q"] = self.engine.queries_counter(session)
+                    if self.rows_enabled:
+                        cur["rows"] = self.engine.row_counters(session)
                 except Exception:  # noqa: BLE001 - counters are best effort
                     if session is not None:
                         session.close()
@@ -118,6 +121,9 @@ class Sampler(threading.Thread):
             pt["tps"] = round(max(0.0, b["tx"] - a["tx"]) / dt, 1)
         if a.get("q") is not None and b.get("q") is not None:
             pt["qps"] = round(max(0.0, b["q"] - a["q"]) / dt, 1)
+        if a.get("rows") and b.get("rows"):
+            for k in ("read", "inserted", "updated", "deleted"):
+                pt["rows_" + k] = round(max(0.0, b["rows"][k] - a["rows"][k]) / dt, 1)
         with self.lock:
             self.series.append(pt)
 

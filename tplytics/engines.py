@@ -51,6 +51,20 @@ class Engine:
 
     #: same, for a cumulative counter of statements: shown as "queries/s". None = not shown.
     queries_sql = None
+    #: one row of cumulative row counters, in the order read, inserted, updated,
+    #: deleted: shown as rows read/s and rows changed/s. None = not shown.
+    rows_sql = None
+
+    def row_counters(self, session):
+        if not self.rows_sql:
+            return None
+        cols, rows = session.execute(self.rows_sql)
+        if not rows:
+            return None
+        if len(rows) > 1 or len(rows[0]) == 2:          # SHOW STATUS: name/value rows
+            by_name = {str(r[0]).lower(): float(r[1] or 0) for r in rows}
+            return {k: by_name.get("innodb_rows_" + k, 0.0) for k in ("read", "inserted", "updated", "deleted")}
+        return dict(zip(("read", "inserted", "updated", "deleted"), (float(v or 0) for v in rows[0])))
 
     def activity_counter(self, session):
         return self._counter(session, self.activity_sql)
@@ -185,6 +199,8 @@ class MySQLEngine(Engine):
 
     activity_sql = "SHOW GLOBAL STATUS WHERE Variable_name IN ('Com_commit', 'Com_rollback')"
     queries_sql = "SHOW GLOBAL STATUS WHERE Variable_name = 'Queries'"
+    rows_sql = ("SHOW GLOBAL STATUS WHERE Variable_name IN "
+                "('Innodb_rows_read', 'Innodb_rows_inserted', 'Innodb_rows_updated', 'Innodb_rows_deleted')")
     heartbeat_ts_type = "DATETIME"   # TIMESTAMP would follow the session time zone
 
     def timeout_statement(self, seconds):
@@ -275,6 +291,7 @@ class DBTrailEngine(MySQLEngine):
     default_port = 3309
     activity_sql = None   # the copy has no transaction counters
     queries_sql = None
+    rows_sql = None
     heartbeat_writable = False
 
     def connect(self):
@@ -307,6 +324,8 @@ class PostgreSQLEngine(Engine):
     dialects = ["postgresql", "default"]
     default_port = 5432
     activity_sql = "SELECT SUM(xact_commit + xact_rollback) FROM pg_stat_database"
+    rows_sql = ("SELECT SUM(tup_returned + tup_fetched), SUM(tup_inserted), SUM(tup_updated), SUM(tup_deleted) "
+                "FROM pg_stat_database")
 
     def connect(self):
         s = PostgreSQLSession(self)
