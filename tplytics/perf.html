@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance · tplytics compare</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0f0f0e; --surface-1: #191918; --surface-2: #212120; --text-primary: #ffffff; --text-secondary: #c3c2b7;
+  --muted: #8d8c85; --line: #2c2c2a; --grid: #2a2a28;
+  --c1: #3987e5; --c2: #e0a030; --c3: #ef6a6a; --c4: #3cb371; --c5: #b47ee5; --c6: #8d8c85;
+  --n0: #8d8c85; --n1: #3987e5; --n2: #e8743b;
+  --good: #3cb371; --warning: #e0a030; --critical: #ef6a6a; --accent: #3987e5;
+}
+@media (prefers-color-scheme: light) {
+  :root:where(:not([data-theme="dark"])) {
+    color-scheme: light;
+    --bg: #f2f3f5; --surface-1: #fcfcfb; --surface-2: #f5f5f2; --text-primary: #0b0b0b; --text-secondary: #52514e;
+    --muted: #7a7974; --line: #e1e0dc; --grid: #ebeae6;
+    --c1: #2a78d6; --c2: #b77900; --c3: #d03b3b; --c4: #1a8a4a; --c5: #8a52c7; --c6: #7a7974;
+    --n0: #7a7974; --n1: #2a78d6; --n2: #d95f22;
+    --good: #1a8a4a; --warning: #b77900; --critical: #d03b3b; --accent: #2a78d6;
+  }
+}
+html { font-size: clamp(11px, 0.68vw, 26px); }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary); font: 1rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { padding: 0.7rem 1.2rem 1.2rem; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1.2rem; margin-bottom: 0.7rem; }
+header h1 { font-size: 1.5rem; margin: 0; }
+header .meta { color: var(--text-secondary); font-size: 0.95rem; flex: 1 1 20rem; }
+header a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.nodes { display: grid; gap: 1rem; align-items: start; }
+.node { min-width: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.nhead { background: var(--surface-1); border: 1px solid var(--line); border-top: 0.35rem solid var(--nc); border-radius: 0.7rem; padding: 0.6rem 0.9rem; }
+.nhead .name { font-size: 1.5rem; font-weight: 800; color: var(--nc); }
+.nhead .sub { color: var(--text-secondary); font-size: 0.9rem; }
+.nhead .err { color: var(--critical); font-size: 0.9rem; margin-top: 0.3rem; }
+h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin: 0.4rem 0 0; font-weight: 700; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+.card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.45rem 0.7rem 0.4rem; min-width: 0; position: relative; }
+.card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; }
+.card .k { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .v { font-size: 1.25rem; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.card .v small { font-size: 0.8rem; color: var(--text-secondary); font-weight: 500; margin-left: 0.15rem; }
+.card .legend { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.1em; }
+.card .legend i { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 2px; margin: 0 0.2rem 0 0.45rem; vertical-align: baseline; }
+.card .legend i:first-child { margin-left: 0; }
+.card .legend b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+svg.ch { display: block; width: 100%; height: 3.4rem; margin-top: 0.2rem; overflow: visible; }
+svg.ch .gl { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+svg.ch .ln { fill: none; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+svg.ch .ar { opacity: .8; stroke: none; }
+.ymax { position: absolute; right: 0.7rem; bottom: 3.55rem; font-size: 0.65rem; color: var(--muted); pointer-events: none; }
+table.u { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+table.u th, table.u td { padding: 0.22rem 0.5rem; border-top: 1px solid var(--line); white-space: nowrap; }
+table.u th { text-align: left; color: var(--text-secondary); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+table.u td.n, table.u th.n { text-align: right; font-variant-numeric: tabular-nums; }
+table.u td.nm { overflow: hidden; text-overflow: ellipsis; max-width: 12rem; }
+table.u svg { width: 6.5rem; height: 1.3rem; display: block; }
+.bar { display: inline-block; height: 0.5rem; border-radius: 99px; background: var(--nc); vertical-align: middle; margin-left: 0.3rem; opacity: .8; }
+.empty { color: var(--muted); padding: 0.6rem; font-size: 0.9rem; }
+@media (max-width: 1100px) { .nodes { grid-template-columns: minmax(0, 1fr) !important; } html { font-size: 13px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="title">Performance</h1>
+    <div class="meta" id="meta">loading…</div>
+    <a href="./">← back to the comparison</a>
+  </header>
+  <div class="nodes" id="nodes"></div>
+</div>
+<script>
+let D = null, built = "";
+const NC = i => `var(--n${i % 3})`;
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+function fmt(v, d = 0) { return v === null || v === undefined || Number.isNaN(v) ? "–" : Number(v).toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}); }
+function big(v, d, unit) { return `${fmt(v, d)}${unit ? `<small>${unit}</small>` : ""}`; }
+function niceMax(v) { if (!(v > 0)) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
+function bytesMB(mb) { return mb >= 1024 ? fmt(mb / 1024, 1) + " GB" : fmt(mb, 0) + " MB"; }
+
+/* one chart: series = [{f, c, name}], stack = true draws stacked areas, max fixes the scale */
+function chart(pts, series, o = {}) {
+  const W = 300, H = 50, N = 180;
+  const raw = (p, f) => typeof f === "function" ? f(p) : p[f];
+  pts = pts.filter(p => series.some(s => { const v = raw(p, s.f); return v !== undefined && v !== null && !Number.isNaN(v); }));
+  if (pts.length < 2) return {svg: "", ymax: null};
+  const val = (p, f) => +raw(p, f) || 0;
+  const tot = p => o.stack ? series.reduce((a, s) => a + val(p, s.f), 0) : Math.max(...series.map(s => val(p, s.f)));
+  const ymax = o.max || niceMax(Math.max(...pts.map(tot)) * 1.1);
+  const X = i => (i + (N - pts.length)) / (N - 1) * W, Y = v => H - 1 - Math.min(v, ymax) / ymax * (H - 3);
+  let h = `<line class="gl" x1="0" x2="${W}" y1="${H - 0.5}" y2="${H - 0.5}"/><line class="gl" x1="0" x2="${W}" y1="${Y(ymax / 2)}" y2="${Y(ymax / 2)}"/>`;
+  if (o.stack) {
+    let below = pts.map(() => 0);
+    series.forEach(s => {
+      const above = pts.map((p, i) => below[i] + val(p, s.f));
+      const top = above.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+      const back = below.map((v, i) => `L${X(i).toFixed(1)},${Y(v).toFixed(1)}`).reverse().join("");
+      h += `<path class="ar" style="fill:${s.c}" d="${top}${back}Z"/>`;
+      below = above;
+    });
+  } else {
+    series.forEach(s => { h += `<path class="ln" style="stroke:${s.c}" d="${pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(val(p, s.f)).toFixed(1)}`).join("")}"/>`; });
+  }
+  return {svg: h, ymax};
+}
+
+/* metric cards: head shows the latest total (stack) or the first series; the legend shows each series' latest */
+const OS = [
+  {id: "cpu", t: "CPU %", stack: 1, max: 100, unit: "%", d: 0, s: [{f: "cpu_user", c: "var(--c1)", name: "user"}, {f: "cpu_system", c: "var(--c2)", name: "sys"},
+    {f: "cpu_irq", c: "var(--c6)", name: "irq"}, {f: "cpu_iowait", c: "var(--c5)", name: "iowait"}, {f: "cpu_steal", c: "var(--c3)", name: "steal"}]},
+  {id: "load", t: "Load / run queue", d: 1, s: [{f: "load1", c: "var(--c1)", name: "load1"}, {f: "run_queue", c: "var(--c2)", name: "running"}, {f: "blocked", c: "var(--c3)", name: "blocked"}]},
+  {id: "psi", t: "Pressure stall %", unit: "%", d: 1, need: n => n.psi, s: [{f: "psi_cpu_some", c: "var(--c1)", name: "cpu"},
+    {f: "psi_memory_some", c: "var(--c3)", name: "mem"}, {f: "psi_io_some", c: "var(--c5)", name: "io"}]},
+  {id: "mem", t: "Memory", stack: 1, unit: "MB", d: 0, max: n => n.mem_total_mb, head: p => p.mem_used_mb,
+    s: [{f: "mem_used_mb", c: "var(--c1)", name: "used"}, {f: "mem_cache_mb", c: "var(--c6)", name: "cache"}]},
+  {id: "swap", t: "Swap used", unit: "MB", d: 0, s: [{f: "swap_used_mb", c: "var(--c3)", name: "used MB"}],
+   extra: p => `swap in ${fmt(p.swap_in, 1)} · out ${fmt(p.swap_out, 1)} MB/s`},
+  {id: "faults", t: "Context switches / major faults", d: 0, s: [{f: p => p.ctxt === undefined ? undefined : p.ctxt / 1000, c: "var(--c1)", name: "k ctxsw/s"},
+    {f: "major_faults", c: "var(--c3)", name: "maj faults/s"}]},
+  {id: "iops", t: "Disk IOPS", stack: 1, d: 0, s: [{f: "read_iops", c: "var(--c1)", name: "read"}, {f: "write_iops", c: "var(--c3)", name: "write"}]},
+  {id: "dmb", t: "Disk MB/s", stack: 1, unit: "MB/s", d: 1, s: [{f: "read_mb", c: "var(--c1)", name: "read"}, {f: "write_mb", c: "var(--c3)", name: "write"}]},
+  {id: "util", t: "Disk busy %", max: 100, unit: "%", d: 0, s: [{f: "disk_util", c: "var(--c5)", name: "busiest disk"}]},
+  {id: "net", t: "Network MB/s", stack: 1, unit: "MB/s", d: 2, s: [{f: "net_rx_mb", c: "var(--c4)", name: "rx"}, {f: "net_tx_mb", c: "var(--c2)", name: "tx"}]},
+];
+const MYSQL = [
+  {id: "qps", t: "Queries / transactions", d: 0, s: [{f: "db_qps", c: "var(--c1)", name: "qps"}, {f: "db_tps", c: "var(--c4)", name: "tps"}]},
+  {id: "rr", t: "Rows read/s", d: 0, s: [{f: "db_rows_read", c: "var(--c1)", name: "read"}]},
+  {id: "rc", t: "Rows changed/s", stack: 1, d: 0, s: [{f: "db_rows_inserted", c: "var(--c4)", name: "ins"}, {f: "db_rows_updated", c: "var(--c2)", name: "upd"}, {f: "db_rows_deleted", c: "var(--c3)", name: "del"}]},
+  {id: "bp", t: "Buffer pool disk reads/s", d: 0, s: [{f: "db_bp_disk_reads", c: "var(--c3)", name: "reads/s"}], extra: p => `hit ${fmt(p.db_bp_hit, 2)}%`},
+  {id: "redo", t: "Redo written", unit: "MB/s", d: 2, s: [{f: p => p.db_redo_written === undefined ? undefined : p.db_redo_written / 1048576, c: "var(--c5)", name: "redo MB/s"}],
+   extra: p => `checkpoint age ${fmt(p.db_checkpoint_age_mb, 0)} MB`},
+  {id: "io", t: "InnoDB data MB/s", stack: 1, unit: "MB/s", d: 1, s: [{f: p => p.db_data_read === undefined ? undefined : p.db_data_read / 1048576, c: "var(--c1)", name: "read"},
+    {f: p => p.db_data_written === undefined ? undefined : p.db_data_written / 1048576, c: "var(--c3)", name: "written"}]},
+  {id: "thr", t: "Threads", d: 0, s: [{f: "db_threads_running", c: "var(--c3)", name: "running"}, {f: "db_threads_connected", c: "var(--c1)", name: "connected"}]},
+  {id: "hll", t: "History list / lock waits", d: 0, s: [{f: "db_history_list", c: "var(--c5)", name: "history list"}, {f: "db_lock_waits", c: "var(--c3)", name: "lock waits/s"}]},
+];
+const DBTRAIL = [
+  {id: "ev", t: "Changes indexed/s", d: 0, s: [{f: "db_events_indexed", c: "var(--c1)", name: "indexed"}, {f: "db_events_received", c: "var(--c6)", name: "received"}]},
+  {id: "lag", t: "Capture lag", unit: "s", d: 1, s: [{f: "db_stream_lag", c: "var(--c2)", name: "lag s"}]},
+  {id: "cl", t: "Index commit latency", unit: "ms", d: 1, s: [{f: "db_commit_latency_ms", c: "var(--c5)", name: "ms"}]},
+  {id: "fl", t: "Index batch flushes/s", d: 1, s: [{f: "db_batch_flushes", c: "var(--c1)", name: "flushes/s"}]},
+  {id: "ix", t: "Index size", unit: "GB", d: 2, s: [{f: p => p.db_index_bytes === undefined ? undefined : p.db_index_bytes / 1073741824, c: "var(--c4)", name: "GB"}],
+   extra: p => `${fmt((p.db_index_events || 0) / 1e6, 1)} M events`},
+  {id: "sq", t: "SQL on the copy: waiting", d: 0, s: [{f: "db_sql_waiting", c: "var(--c3)", name: "statements"}]},
+];
+
+function cardHtml(nid, m) { return `<div class="card" id="${nid}-${m.id}"><div class="top"><span class="k">${m.t}</span><span class="v">–</span></div>
+  <div class="legend"></div><svg class="ch" viewBox="0 0 300 50" preserveAspectRatio="none"></svg><span class="ymax"></span></div>`; }
+function drawCard(nid, m, n) {
+  const el = document.getElementById(`${nid}-${m.id}`);
+  if (!el) return;
+  const pts = n.series || [], last = pts[pts.length - 1] || {};
+  const val = (s) => typeof s.f === "function" ? s.f(last) : last[s.f];
+  const head = m.head ? m.head(last) : m.stack ? m.s.reduce((a, s) => a + (+val(s) || 0), 0) : val(m.s[0]);
+  el.querySelector(".v").innerHTML = big(head, m.d, m.unit);
+  el.querySelector(".legend").innerHTML = m.s.map(s => `<i style="background:${s.c}"></i>${s.name} <b>${fmt(val(s), m.d)}</b>`).join("") +
+    (m.extra ? ` · ${m.extra(last)}` : "");
+  const {svg, ymax} = chart(pts, m.s, {stack: m.stack, max: typeof m.max === "function" ? m.max(n) : m.max});
+  el.querySelector("svg").innerHTML = svg;
+  el.querySelector(".ymax").textContent = ymax === null ? "" : "max " + fmt(ymax, ymax < 10 ? 1 : 0);
+}
+function unitsHtml(n, i) {
+  const u = Object.entries(n.units || {}).sort((a, b) => b[1].cpu_avg - a[1].cpu_avg || b[1].mem_mb - a[1].mem_mb).slice(0, 10);
+  if (!u.length) return `<div class="empty">No service or container data (cgroup v2 not readable).</div>`;
+  const maxMem = Math.max(...u.map(x => x[1].mem_mb), 1);
+  return `<table class="u"><tr><th>Service / container</th><th class="n">CPU now</th><th class="n">avg</th><th class="n">max</th><th>CPU, 15 min</th><th class="n">Memory</th></tr>` +
+    u.map(([name, x]) => {
+      const pts = x.points.map(p => ({t: p[0], cpu: p[1]}));
+      const {svg} = chart(pts, [{f: "cpu", c: NC(i)}], {max: Math.max(100, niceMax(x.cpu_max))});
+      return `<tr><td class="nm" title="${esc(name)}">${esc(name)}</td><td class="n">${fmt(x.cpu, 0)}%</td><td class="n">${fmt(x.cpu_avg, 0)}%</td><td class="n">${fmt(x.cpu_max, 0)}%</td>
+        <td><svg viewBox="0 0 300 50" preserveAspectRatio="none">${svg}</svg></td>
+        <td class="n">${bytesMB(x.mem_mb)}<span class="bar" style="width:${(3 * x.mem_mb / maxMem).toFixed(2)}rem;--nc:${NC(i)}"></span></td></tr>`;
+    }).join("") + `</table><div class="empty" style="padding:.3rem 0 0">CPU in % of one CPU (${n.cpus} CPUs = ${n.cpus * 100}%). Idle units under 64 MB are hidden.</div>`;
+}
+function dbMetrics(n) { return n.db_kind === "dbtrail" ? DBTRAIL : (n.db_kind === "mysql" || n.db_kind === "mariadb") ? MYSQL : []; }
+function build() {
+  const el = document.getElementById("nodes");
+  el.style.gridTemplateColumns = `repeat(${D.nodes.length}, minmax(0, 1fr))`;
+  el.innerHTML = D.nodes.map((n, i) => {
+    const nid = "n" + i, db = dbMetrics(n);
+    return `<div class="node" style="--nc:${NC(i)}"><div class="nhead"><div class="name">${esc(n.label)}</div><div class="sub" id="${nid}-sub"></div><div class="err" id="${nid}-err"></div></div>
+      <h2>Operating system</h2><div class="grid">${OS.filter(m => !m.need || m.need(n)).map(m => cardHtml(nid, m)).join("")}</div>
+      ${db.length ? `<h2>Database · ${n.db_kind === "dbtrail" ? "DBTrail capture and index" : esc(n.db_kind)}</h2><div class="grid">${db.map(m => cardHtml(nid, m)).join("")}</div>` : ""}
+      <h2>Services and containers</h2><div class="card" id="${nid}-units"></div></div>`;
+  }).join("");
+}
+function render() {
+  const key = D.nodes.map(n => n.label + ":" + n.ok + ":" + n.db_kind + ":" + n.psi).join("|");
+  if (key !== built) { build(); built = key; }
+  document.getElementById("title").textContent = "Performance · " + (D.title || "");
+  document.getElementById("meta").textContent = `last 15 minutes, one point every ${(D.nodes.find(n => n.step) || {}).step || 5} s · updated ${new Date(D.now * 1000).toLocaleTimeString([], {hour12: false})}`;
+  D.nodes.forEach((n, i) => {
+    const nid = "n" + i;
+    document.getElementById(nid + "-sub").textContent = n.ok ? `${n.role === "primary" ? "primary + HammerDB" : "target"} · ${n.host} · ${n.cpus} CPUs · ${bytesMB(n.mem_total_mb)} RAM` : "";
+    document.getElementById(nid + "-err").textContent = n.ok ? (n.db_error ? "database metrics: " + n.db_error : "") : (n.error || "no data");
+    if (!n.ok) return;
+    OS.concat(dbMetrics(n)).forEach(m => drawCard(nid, m, n));
+    document.getElementById(nid + "-units").innerHTML = unitsHtml(n, i);
+  });
+}
+async function poll() {
+  try { const r = await fetch("api/perf"); D = await r.json(); render(); }
+  catch (e) { document.getElementById("meta").textContent = "disconnected"; }
+  setTimeout(poll, 5000);
+}
+poll();
+</script>
+</body>
+</html>

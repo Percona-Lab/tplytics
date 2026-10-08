@@ -187,6 +187,12 @@ def build_parser():
     g.add_argument("--listen", default="127.0.0.1", help="monitor: address for --http-port (default 127.0.0.1)")
     g.add_argument("--system-stats", action="store_true",
                    help="monitor: also serve this host's CPU and disk load on /api/system (for tplytics compare)")
+    g.add_argument("--perf", action="store_true",
+                   help="monitor: also serve detailed OS, unit and database metrics on /api/perf "
+                        "(for the compare dashboard's /performance page)")
+    g.add_argument("--prometheus-url", default=None, metavar="URL",
+                   help="monitor --perf: read database metrics from this Prometheus endpoint (e.g. DBTrail's "
+                        "http://127.0.0.1:9090/metrics) instead of the monitored database")
     g.add_argument("--skew", type=float, default=None,
                    help="monitor: read this many seconds after each write tick (default: half the interval)")
     g.add_argument("--max-lag", type=float, default=None,

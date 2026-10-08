@@ -57,6 +57,7 @@ from .runner import OK, TIMEOUT, Runner
 from .state import DatabaseState, StateRefresher, human_duration
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare.html")
+PERF_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "perf.html")
 LAG_STEP = 5.0               # seconds between points of the lag history
 LAG_POINTS = 180             # 15 minutes
 CONN_KEYS = ("engine", "host", "port", "socket", "user", "password", "database", "schema",
@@ -648,7 +649,30 @@ def _copy_entry(e):
 
 
 # ================================================================== server
-def make_handler(loop, targets, local, primary, args):
+def perf_doc(targets, local_perf, primary, args):
+    """Every node's detailed performance: this host (the primary) and each target's monitor."""
+    nodes = []
+    if local_perf is not None:
+        d = local_perf.snapshot()
+        d.update(label=primary.label if primary else d["host"], role="primary", ok=True)
+        nodes.append(d)
+    for i, t in enumerate(targets):
+        node = {"label": t.label, "role": "target", "index": i, "ok": False}
+        if t.opts.status_url:
+            try:
+                with urllib.request.urlopen(t.opts.status_url.rstrip("/") + "/api/perf", timeout=4) as r:
+                    node.update(json.load(r))
+                node["ok"] = True
+            except Exception as e:  # noqa: BLE001
+                node["error"] = "%s/api/perf: %s" % (t.opts.status_url.rstrip("/"), str(e)[:160])
+        else:
+            node["error"] = "no status_url for this target"
+        node["label"] = t.label
+        nodes.append(node)
+    return {"title": args.title, "now": time.time(), "nodes": nodes}
+
+
+def make_handler(loop, targets, local, primary, args, local_perf=None):
     def state():
         d = loop.snapshot()
         common = loop.state
@@ -694,6 +718,11 @@ def make_handler(loop, targets, local, primary, args):
             if self.path in ("/", "/index.html"):
                 with open(PAGE, "rb") as fh:
                     self._send(200, fh.read(), "text/html; charset=utf-8")
+            elif self.path in ("/performance", "/performance/"):
+                with open(PERF_PAGE, "rb") as fh:
+                    self._send(200, fh.read(), "text/html; charset=utf-8")
+            elif self.path == "/api/perf":
+                self._send(200, json.dumps(perf_doc(targets, local_perf, primary, args), default=str), "application/json")
             elif self.path == "/api/state":
                 self._send(200, json.dumps(state(), default=str), "application/json")
             elif self.path.startswith("/api/query?"):
@@ -797,10 +826,14 @@ def compare(args):
     pengine = get_engine(primary.engine, primary) if primary else None
     local = Sampler(pengine, args.system_stats == "auto")
     local.start()
+    from .perf import PerfSampler
+    local_perf = PerfSampler(pengine) if args.system_stats == "auto" else None
+    if local_perf is not None:
+        local_perf.start()
     for t in targets:
         StatusPoller(t).start()
     loop.start()
-    server = ThreadingHTTPServer((args.listen, args.http_port), make_handler(loop, targets, local, primary, args))
+    server = ThreadingHTTPServer((args.listen, args.http_port), make_handler(loop, targets, local, primary, args, local_perf))
     host = "localhost" if args.listen in ("0.0.0.0", "") else args.listen
     print("compare dashboard on http://%s:%d/  (%d targets, %d queries; Ctrl+C to stop)"
           % (host, args.http_port, len(targets), len(loop.queries)), flush=True)

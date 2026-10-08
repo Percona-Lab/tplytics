@@ -217,6 +217,19 @@ restarts too.
 tplytics compare --config compare.toml          # http://127.0.0.1:8080/
 ```
 
+`/performance` (linked from the page header) shows every node side by side
+over the last 15 minutes: the operating system (CPU split with steal, load and
+run queue, pressure stall information, memory and swap, disk IOPS / MB/s /
+busy %, network, context switches and major faults), the database (for MySQL:
+queries and transactions, rows read and changed, buffer-pool reads and hit
+ratio, redo, InnoDB data I/O, threads, history list and lock waits; for
+DBTrail: changes indexed, capture lag, index commit latency, batch flushes,
+index size and SQL waits, read from its Prometheus `/metrics`), and the CPU
+and memory of every systemd service and Docker container, from their cgroups.
+The primary is sampled by compare itself; each target by its heartbeat monitor
+started with `--perf` (and `--prometheus-url` for DBTrail), which serves
+`/api/perf` next to `/api/heartbeat`.
+
 Targets are described in a TOML file (see `scripts/compare.example.toml`):
 connection keys as on the command line (`engine`, `host`, `port`,
 `defaults_file`, ...), a `label`, and a `status_url`: a heartbeat monitor

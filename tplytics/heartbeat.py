@@ -244,7 +244,7 @@ def _fmt(x):
     return "-" if x is None else "%.3fs" % x
 
 
-def serve_http(monitor, listen, port, sampler=None):
+def serve_http(monitor, listen, port, sampler=None, perf=None):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     class Handler(BaseHTTPRequestHandler):
@@ -252,6 +252,8 @@ def serve_http(monitor, listen, port, sampler=None):
             path = self.path.split("?")[0]
             if path in ("/", "/api/heartbeat"):
                 doc = monitor.snapshot()
+            elif path == "/api/perf" and perf is not None:
+                doc = perf.snapshot()
             elif path == "/api/system" and sampler is not None:
                 doc = {"host": socket.gethostname(), "cpus": os.cpu_count(), "system_stats": sampler.system,
                        "series": sampler.snapshot()}
@@ -283,7 +285,13 @@ def run_monitor(args, engine):
             from .dashboard import Sampler
             sampler = Sampler(None, True)
             sampler.start()
-        serve_http(m, args.listen, args.http_port, sampler)
+        perf = None
+        if args.perf:
+            from .perf import PerfSampler
+            perf = PerfSampler(None if args.prometheus_url else engine, prometheus_url=args.prometheus_url)
+            perf.start()
+            log("serving detailed performance on http://%s:%d/api/perf" % (args.listen, args.http_port))
+        serve_http(m, args.listen, args.http_port, sampler, perf)
         if sampler is not None:
             log("serving this host's CPU and disk load on http://%s:%d/api/system" % (args.listen, args.http_port))
     skew = args.interval / 2 if args.skew is None else args.skew
