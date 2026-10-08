@@ -42,7 +42,15 @@ header a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .nhead .sub { color: var(--text-secondary); font-size: 0.9rem; }
 .nhead .err { color: var(--critical); font-size: 0.9rem; margin-top: 0.3rem; }
 h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin: 0.4rem 0 0; font-weight: 700; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: 0.6rem; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+@media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.ranges { display: inline-flex; border: 1px solid var(--line); border-radius: 0.5rem; overflow: hidden; }
+.ranges button { font: inherit; font-weight: 650; background: var(--surface-1); color: var(--text-secondary); border: 0;
+                 border-left: 1px solid var(--line); padding: 0.3rem 0.9rem; cursor: pointer; }
+.ranges button:first-child { border-left: 0; }
+.ranges button.on { background: var(--accent); color: #fff; }
+.xax { display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--muted); margin-top: 0.1rem; }
 .card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.45rem 0.7rem 0.4rem; min-width: 0; position: relative; }
 .card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; }
 .card .k { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -56,7 +64,7 @@ svg.ch { display: block; width: 100%; height: 5.2rem; margin-top: 0.2rem; overfl
 svg.ch .gl { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
 svg.ch .ln { fill: none; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 svg.ch .ar { opacity: .8; stroke: none; }
-.ymax { position: absolute; right: 0.7rem; bottom: 5.35rem; font-size: 0.65rem; color: var(--muted); pointer-events: none; }
+.ymax { position: absolute; right: 0.7rem; bottom: 6.3rem; font-size: 0.65rem; color: var(--muted); pointer-events: none; }
 table.u { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 table.u th, table.u td { padding: 0.22rem 0.5rem; border-top: 1px solid var(--line); white-space: nowrap; }
 table.u th { text-align: left; color: var(--text-secondary); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
@@ -77,6 +85,7 @@ table.u svg { width: 100%; height: 1.9rem; display: block; }
   <header>
     <h1 id="title">Performance</h1>
     <div class="meta" id="meta">loading…</div>
+    <div class="ranges" id="ranges"><button data-r="15m">15 min</button><button data-r="1h">1 h</button><button data-r="6h">6 h</button><button data-r="24h">24 h</button></div>
     <div class="jump" id="jump"></div>
     <a href="./">← back to the comparison</a>
   </header>
@@ -92,15 +101,18 @@ function niceMax(v) { if (!(v > 0)) return 1; const p = Math.pow(10, Math.floor(
 function bytesMB(mb) { return mb >= 1024 ? fmt(mb / 1024, 1) + " GB" : fmt(mb, 0) + " MB"; }
 
 /* one chart: series = [{f, c, name}], stack = true draws stacked areas, max fixes the scale */
+let RANGE = "1h";
+try { RANGE = localStorage.getItem("tplytics-perf-range") || "1h"; } catch (e) {}
+const SPAN = {"15m": 900, "1h": 3600, "6h": 21600, "24h": 86400};
 function chart(pts, series, o = {}) {
-  const W = 300, H = 50, N = 180;
+  const W = 300, H = 50, span = SPAN[RANGE], t1 = (D && D.now) || Date.now() / 1000, t0 = t1 - span;
   const raw = (p, f) => typeof f === "function" ? f(p) : p[f];
-  pts = pts.filter(p => series.some(s => { const v = raw(p, s.f); return v !== undefined && v !== null && !Number.isNaN(v); }));
+  pts = pts.filter(p => p.t >= t0 && series.some(s => { const v = raw(p, s.f); return v !== undefined && v !== null && !Number.isNaN(v); }));
   if (pts.length < 2) return {svg: "", ymax: null};
   const val = (p, f) => +raw(p, f) || 0;
   const tot = p => o.stack ? series.reduce((a, s) => a + val(p, s.f), 0) : Math.max(...series.map(s => val(p, s.f)));
   const ymax = o.max || niceMax(Math.max(...pts.map(tot)) * 1.1);
-  const X = i => (i + (N - pts.length)) / (N - 1) * W, Y = v => H - 1 - Math.min(v, ymax) / ymax * (H - 3);
+  const X = i => Math.max(0, (pts[i].t - t0) / span * W), Y = v => H - 1 - Math.min(v, ymax) / ymax * (H - 3);
   let h = `<line class="gl" x1="0" x2="${W}" y1="${H - 0.5}" y2="${H - 0.5}"/><line class="gl" x1="0" x2="${W}" y1="${Y(ymax / 2)}" y2="${Y(ymax / 2)}"/>`;
   if (o.stack) {
     let below = pts.map(() => 0);
@@ -158,7 +170,8 @@ const DBTRAIL = [
 ];
 
 function cardHtml(nid, m) { return `<div class="card" id="${nid}-${m.id}"><div class="top"><span class="k">${m.t}</span><span class="v">–</span></div>
-  <div class="legend"></div><svg class="ch" viewBox="0 0 300 50" preserveAspectRatio="none"></svg><span class="ymax"></span></div>`; }
+  <div class="legend"></div><svg class="ch" viewBox="0 0 300 50" preserveAspectRatio="none"></svg><span class="ymax"></span>
+  <div class="xax"><span class="x0"></span><span>now</span></div></div>`; }
 function drawCard(nid, m, n) {
   const el = document.getElementById(`${nid}-${m.id}`);
   if (!el) return;
@@ -171,13 +184,14 @@ function drawCard(nid, m, n) {
   const {svg, ymax} = chart(pts, m.s, {stack: m.stack, max: typeof m.max === "function" ? m.max(n) : m.max});
   el.querySelector("svg").innerHTML = svg;
   el.querySelector(".ymax").textContent = ymax === null ? "" : "max " + fmt(ymax, ymax < 10 ? 1 : 0);
+  el.querySelector(".x0").textContent = "−" + ({"15m": "15 min", "1h": "1 h", "6h": "6 h", "24h": "24 h"})[RANGE];
 }
 function unitsHtml(n, i) {
   const u = Object.entries(n.units || {}).sort((a, b) => b[1].cpu_avg - a[1].cpu_avg || b[1].mem_mb - a[1].mem_mb).slice(0, 12);
   if (!u.length) return `<div class="empty">No service or container data (cgroup v2 not readable).</div>`;
-  const span = n.series && n.series.length > 1 ? Math.round((n.series[n.series.length - 1].t - n.series[0].t) / 60) : 0;
-  return `<table class="u"><tr><th>Service / container · main process</th><th class="n">CPU now</th><th class="n">avg</th><th class="n">max</th><th>CPU, last ${span} min</th>
-      <th class="n">Memory now</th><th class="n">min – max</th><th class="n">change</th><th>Memory, last ${span} min</th></tr>` +
+  const span = ({"15m": "15 min", "1h": "1 h", "6h": "6 h", "24h": "24 h"})[RANGE];
+  return `<table class="u"><tr><th>Service / container · main process</th><th class="n">CPU now</th><th class="n">avg</th><th class="n">max</th><th>CPU, last ${span}</th>
+      <th class="n">Memory now</th><th class="n">min – max</th><th class="n">change</th><th>Memory, last ${span}</th></tr>` +
     u.map(([name, x]) => {
       const pts = x.points.map(p => ({t: p[0], cpu: p[1], mem: p[2]}));
       const cpu = chart(pts, [{f: "cpu", c: NC(i)}], {max: Math.max(100, niceMax(x.cpu_max))});
@@ -208,7 +222,11 @@ function render() {
   const key = D.nodes.map(n => n.label + ":" + n.ok + ":" + n.db_kind + ":" + n.psi).join("|");
   if (key !== built) { build(); built = key; }
   document.getElementById("title").textContent = "Performance · " + (D.title || "");
-  document.getElementById("meta").textContent = `last 15 minutes, one point every ${(D.nodes.find(n => n.step) || {}).step || 5} s · updated ${new Date(D.now * 1000).toLocaleTimeString([], {hour12: false})}`;
+  const step = (D.nodes.find(n => n.step) || {}).step || 5, have = Math.min(...D.nodes.filter(n => n.ok).map(n => n.history_seconds || 0));
+  document.getElementById("meta").textContent = `last ${({"15m": "15 minutes", "1h": "hour", "6h": "6 hours", "24h": "24 hours"})[RANGE]}, ` +
+    `one point every ${step >= 60 ? step / 60 + " min (averages)" : step + " s"} · updated ${new Date(D.now * 1000).toLocaleTimeString([], {hour12: false})}` +
+    (have < SPAN[RANGE] ? ` · collected for ${have >= 3600 ? (have / 3600).toFixed(1) + " h" : Math.round(have / 60) + " min"} so far` : "");
+  document.querySelectorAll("#ranges button").forEach(b => b.classList.toggle("on", b.dataset.r === RANGE));
   D.nodes.forEach((n, i) => {
     const nid = "n" + i;
     document.getElementById(nid + "-sub").textContent = n.ok ? `${n.role === "primary" ? "primary + HammerDB" : "target"} · ${n.host} · ${n.cpus} CPUs · ${bytesMB(n.mem_total_mb)} RAM` : "";
@@ -218,11 +236,22 @@ function render() {
     document.getElementById(nid + "-units").innerHTML = unitsHtml(n, i);
   });
 }
+let pollTimer = null;
 async function poll() {
-  try { const r = await fetch("api/perf"); D = await r.json(); render(); }
+  clearTimeout(pollTimer);
+  const want = RANGE;
+  try { const r = await fetch("api/perf?range=" + want); const d = await r.json(); if (want === RANGE) { D = d; render(); } }
   catch (e) { document.getElementById("meta").textContent = "disconnected"; }
-  setTimeout(poll, 5000);
+  pollTimer = setTimeout(poll, SPAN[RANGE] > 3600 ? 60000 : 5000);    // averaged views change once a minute
 }
+document.getElementById("ranges").addEventListener("click", ev => {
+  const b = ev.target.closest("button[data-r]");
+  if (!b || b.dataset.r === RANGE) return;
+  RANGE = b.dataset.r;
+  try { localStorage.setItem("tplytics-perf-range", RANGE); } catch (e) {}
+  document.querySelectorAll("#ranges button").forEach(x => x.classList.toggle("on", x.dataset.r === RANGE));
+  poll();
+});
 poll();
 </script>
 </body>

@@ -25,7 +25,30 @@ import threading
 import time
 import urllib.request
 
-POINTS = 180                 # 15 minutes at 5 s
+RAW_POINTS = 720             # 1 hour at 5 s
+MINUTE_POINTS = 1440         # 24 hours of 1-minute averages
+RANGES = {"15m": 900, "1h": 3600, "6h": 6 * 3600, "24h": 24 * 3600}
+
+
+def _average(points):
+    """One point from several: the mean of every numeric field, the last time."""
+    out = {"t": points[-1]["t"]}
+    keys = set().union(*points)
+    for k in keys:
+        if k == "t":
+            continue
+        vals = [p[k] for p in points if isinstance(p.get(k), (int, float))]
+        if vals:
+            out[k] = round(sum(vals) / len(vals), 3)
+    return out
+
+
+def _downsample(points, every):
+    """Average consecutive groups of `every` points (newest group may be partial)."""
+    if every <= 1:
+        return list(points)
+    pts = list(points)
+    return [_average(pts[i:i + every]) for i in range(0, len(pts), every)]
 CG = "/sys/fs/cgroup"
 
 
@@ -240,8 +263,12 @@ class PerfSampler(threading.Thread):
         self.engine, self.prom, self.step = engine, prometheus_url, step
         self.db_kind = db_kind or ("dbtrail" if prometheus_url else (engine.name if engine else None))
         self.disks = _whole_disks() if os.path.isdir("/sys/block") else set()
-        self.series = collections.deque(maxlen=POINTS)
-        self.units = collections.defaultdict(lambda: collections.deque(maxlen=POINTS))
+        # 5 s points for the last hour, and 1-minute averages for 24 hours
+        self.series = collections.deque(maxlen=RAW_POINTS)
+        self.minutes = collections.deque(maxlen=MINUTE_POINTS)
+        self.units = collections.defaultdict(lambda: collections.deque(maxlen=RAW_POINTS))
+        self.unit_minutes = collections.defaultdict(lambda: collections.deque(maxlen=MINUTE_POINTS))
+        self.bucket, self.unit_bucket, self.bucket_minute = [], collections.defaultdict(list), None
         self.names = {}
         self.lock = threading.Lock()
         self.session = None
@@ -336,15 +363,43 @@ class PerfSampler(threading.Thread):
         ua, ub = a["units"], b["units"]
         with self.lock:
             self.series.append(p)
+            minute = int(p["t"] // 60)
+            if self.bucket_minute is not None and minute != self.bucket_minute and self.bucket:
+                self.minutes.append(_average(self.bucket))          # close the finished minute
+                for name, pts in self.unit_bucket.items():
+                    if pts:
+                        self.unit_minutes[name].append((pts[-1][0], round(sum(x[1] for x in pts) / len(pts), 1),
+                                                        round(sum(x[2] for x in pts) / len(pts))))
+                self.bucket, self.unit_bucket = [], collections.defaultdict(list)
+            self.bucket_minute = minute
+            self.bucket.append(p)
             for name, (cpu_us, mem) in ub.items():
                 if name in ua:
                     cpu = round(100.0 * (cpu_us - ua[name][0]) / (dt * 1e6), 1)   # % of one CPU
-                    self.units[name].append((p["t"], max(0.0, cpu), round(mem / 1048576)))
+                    pt = (p["t"], max(0.0, cpu), round(mem / 1048576))
+                    self.units[name].append(pt)
+                    self.unit_bucket[name].append(pt)
 
-    def snapshot(self):
+    def snapshot(self, rng="1h"):
+        """The window `rng` (15m, 1h, 6h, 24h): 5 s points up to 1 h, 1-minute
+        averages for 6 h and 5-minute averages for 24 h."""
+        span = RANGES.get(rng, 3600)
+        cutoff = time.time() - span
         with self.lock:
+            if span <= 3600:
+                series = [x for x in self.series if x["t"] >= cutoff]
+                unit_pts = {n: [x for x in d if x[0] >= cutoff] for n, d in self.units.items()}
+                every = 1
+            else:
+                series = [x for x in self.minutes if x["t"] >= cutoff]
+                unit_pts = {n: [x for x in d if x[0] >= cutoff] for n, d in self.unit_minutes.items()}
+                every = 5 if span > 6 * 3600 else 1
+            series = _downsample(series, every)
             units = {}
-            for name, pts in self.units.items():
+            for name, pts in unit_pts.items():
+                if every > 1:
+                    pts = [(g[-1][0], round(sum(x[1] for x in g) / len(g), 1), round(sum(x[2] for x in g) / len(g)))
+                           for g in (pts[i:i + every] for i in range(0, len(pts), every))]
                 if not pts:
                     continue
                 cpu = [x[1] for x in pts]
@@ -361,6 +416,9 @@ class PerfSampler(threading.Thread):
             for line in _read("/proc/meminfo").splitlines():
                 if line.startswith("MemTotal:"):
                     mem_total = int(line.split()[1]) // 1024
+            oldest = (self.minutes[0]["t"] if self.minutes else (self.series[0]["t"] if self.series else time.time()))
             return {"host": socket.gethostname(), "cpus": self.cpus, "mem_total_mb": mem_total,
-                    "step": self.step, "db_kind": self.db_kind, "db_error": self.db_error,
-                    "psi": os.path.exists("/proc/pressure/cpu"), "series": list(self.series), "units": units}
+                    "step": self.step if span <= 3600 else 60 * every, "range": rng if rng in RANGES else "1h",
+                    "span": span, "history_seconds": round(time.time() - oldest), "now": time.time(),
+                    "db_kind": self.db_kind, "db_error": self.db_error,
+                    "psi": os.path.exists("/proc/pressure/cpu"), "series": series, "units": units}

@@ -253,7 +253,8 @@ def serve_http(monitor, listen, port, sampler=None, perf=None):
             if path in ("/", "/api/heartbeat"):
                 doc = monitor.snapshot()
             elif path == "/api/perf" and perf is not None:
-                doc = perf.snapshot()
+                from urllib.parse import parse_qs, urlsplit
+                doc = perf.snapshot((parse_qs(urlsplit(self.path).query).get("range") or ["1h"])[0])
             elif path == "/api/system" and sampler is not None:
                 doc = {"host": socket.gethostname(), "cpus": os.cpu_count(), "system_stats": sampler.system,
                        "series": sampler.snapshot()}

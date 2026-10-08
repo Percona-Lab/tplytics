@@ -649,18 +649,18 @@ def _copy_entry(e):
 
 
 # ================================================================== server
-def perf_doc(targets, local_perf, primary, args):
+def perf_doc(targets, local_perf, primary, args, rng="1h"):
     """Every node's detailed performance: this host (the primary) and each target's monitor."""
     nodes = []
     if local_perf is not None:
-        d = local_perf.snapshot()
+        d = local_perf.snapshot(rng)
         d.update(label=primary.label if primary else d["host"], role="primary", ok=True)
         nodes.append(d)
     for i, t in enumerate(targets):
         node = {"label": t.label, "role": "target", "index": i, "ok": False}
         if t.opts.status_url:
             try:
-                with urllib.request.urlopen(t.opts.status_url.rstrip("/") + "/api/perf", timeout=4) as r:
+                with urllib.request.urlopen(t.opts.status_url.rstrip("/") + "/api/perf?range=" + rng, timeout=6) as r:
                     node.update(json.load(r))
                 node["ok"] = True
             except Exception as e:  # noqa: BLE001
@@ -669,7 +669,7 @@ def perf_doc(targets, local_perf, primary, args):
             node["error"] = "no status_url for this target"
         node["label"] = t.label
         nodes.append(node)
-    return {"title": args.title, "now": time.time(), "nodes": nodes}
+    return {"title": args.title, "now": time.time(), "range": rng, "nodes": nodes}
 
 
 def make_handler(loop, targets, local, primary, args, local_perf=None):
@@ -721,8 +721,11 @@ def make_handler(loop, targets, local, primary, args, local_perf=None):
             elif self.path in ("/performance", "/performance/"):
                 with open(PERF_PAGE, "rb") as fh:
                     self._send(200, fh.read(), "text/html; charset=utf-8")
-            elif self.path == "/api/perf":
-                self._send(200, json.dumps(perf_doc(targets, local_perf, primary, args), default=str), "application/json")
+            elif self.path.split("?")[0] == "/api/perf":
+                from urllib.parse import parse_qs, urlsplit
+                rng = (parse_qs(urlsplit(self.path).query).get("range") or ["1h"])[0]
+                rng = rng if rng in ("15m", "1h", "6h", "24h") else "1h"
+                self._send(200, json.dumps(perf_doc(targets, local_perf, primary, args, rng), default=str), "application/json")
             elif self.path == "/api/state":
                 self._send(200, json.dumps(state(), default=str), "application/json")
             elif self.path.startswith("/api/query?"):
