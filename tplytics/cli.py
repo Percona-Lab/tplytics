@@ -213,7 +213,8 @@ def build_parser():
                    help="sequential: Q01, Q02, ... in turn; weighted: random by concurrent weight")
     g.add_argument("--timeout", "-t", type=float, default=120.0, help="query timeout in seconds (default 120)")
     g.add_argument("--seed", type=int, default=None, help="random seed for parameter choices")
-    g.add_argument("--history", type=int, default=12, help="finished rounds listed (default 12)")
+    g.add_argument("--history", type=int, default=25,
+                   help="finished rounds kept for 'see more' and the SQL pages (default and minimum 25)")
     g.add_argument("--show-rows", type=int, default=5, help="result rows kept per target (default 5)")
     g.add_argument("--start-paused", action="store_true", help="wait for Resume in the browser")
     g.add_argument("--refresh", type=float, default=60,

@@ -484,7 +484,7 @@ class CompareLoop(threading.Thread):
         if not args.start_paused:
             self.running.set()
         self.current = None
-        self.history = collections.deque(maxlen=args.history)
+        self.history = collections.deque(maxlen=max(args.history, 25))   # the "see more" list shows 25
         self.next_start = None
         self.rounds = 0
         self.rng = random.Random(args.seed)

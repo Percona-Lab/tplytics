@@ -30,7 +30,7 @@
 }
 /* Sized for a big screen: everything scales with the viewport, so a 16:9
    screen (1080p up to 4K) shows the whole board without scrolling. */
-html { font-size: clamp(10px, min(0.74vw, 1.095vh), 32px); }
+html { font-size: clamp(10px, min(0.74vw, 1.075vh), 32px); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text-primary);
        font: 1rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -114,7 +114,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .state.running .dot { animation: pulse 1s infinite; }
 .state.done .dot { background: var(--muted); }
 @keyframes pulse { 50% { opacity: .2; } }
-.res { padding: 0.6rem 0.9rem; border-left: 0.35rem solid var(--tc); min-height: 14.2rem; position: relative; }
+.res { padding: 0.6rem 0.9rem; border-left: 0.35rem solid var(--tc); min-height: 13.4rem; position: relative; }
 .res .top { padding-right: 15rem; }
 .res .corner { position: absolute; top: 0.7rem; right: 0.9rem; display: flex; gap: 0.5rem; align-items: center; }
 .sqllink { font-size: 0.9rem; font-weight: 650; color: var(--tc); text-decoration: none;
@@ -151,6 +151,9 @@ table.t td.qn, table.t td.ql { overflow: hidden; text-overflow: ellipsis; }
 table.t tr.now td { background: var(--surface-2); }
 .sbar { display: inline-block; height: 0.55rem; border-radius: 99px; vertical-align: middle; margin-left: 0.4rem; }
 tr.fresh { animation: slidein .6s ease-out; }
+#recent table.t th, #recent table.t td { padding-top: 0.16rem; padding-bottom: 0.16rem; }
+.seemore { font-size: 0.95em; font-weight: 600; color: var(--accent); text-transform: none; letter-spacing: 0; margin-left: 0.6rem; text-decoration: none; }
+.seemore:hover { text-decoration: underline; }
 .errlink { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 0.2em; }
 .errlink:hover { filter: brightness(1.25); }
 tr.errrow td { border-top: 0; padding-top: 0; white-space: normal; }
@@ -517,17 +520,13 @@ function renderPerQuery() {
 }
 
 /* ---------- recent rounds ---------- */
-function renderRecent() {
-  const hist = (S.history || []).slice(0, 3), T = S.targets;
-  document.getElementById("recentTitle").textContent = hist.length ? `Recent rounds (last ${hist.length})` : "Recent rounds";
-  const seqs = hist.map(h => h.seq).join();
-  if (seqs === shownSeqs) return;
-  const fresh = new Set(hist.map(h => h.seq).filter(s => !shownSeqs.split(",").includes(String(s))));
+function recentTable(hist, fresh, open) {
+  const T = S.targets;
   let h = `<table class="t"><colgroup><col class="w-seq"><col class="w-clock"><col>${T.map(() => `<col class="w-r">`).join("")}${T.length > 1 ? `<col class="w-r">` : ""}</colgroup>
     <tr><th class="n">#</th><th>Time</th><th>Query</th>${T.map((t, i) => `<th class="n" style="color:${TC(i)}">${esc(t.label)}</th>`).join("")}${
     T.length > 1 ? `<th class="n">Ratio</th>` : ""}</tr>`;
   hist.forEach(e => {
-    h += `<tr class="${fresh.has(e.seq) && shownSeqs ? "fresh" : ""}"><td class="n dim">${e.seq}</td><td class="num dim">${clock(e.finished)}</td><td class="ql qlink" data-q="${e.id}" title="Details, SQL and times of ${e.id}"><b>${e.id}</b> ${esc(e.name)}</td>`;
+    h += `<tr class="${fresh.has(e.seq) ? "fresh" : ""}"><td class="n dim">${e.seq}</td><td class="num dim">${clock(e.finished)}</td><td class="ql qlink" data-q="${e.id}" title="Details, SQL and times of ${e.id}"><b>${e.id}</b> ${esc(e.name)}</td>`;
     T.forEach(t => {
       const r = e.results[t.label];
       h += `<td class="n">${r.status === "ok" ? fmtT(r.elapsed) : r.error
@@ -538,15 +537,42 @@ function renderRecent() {
     h += "</tr>";
     const failed = T.filter(t => e.results[t.label].status !== "ok" && e.results[t.label].error);
     if (failed.length) {
-      h += `<tr class="errrow" data-seq="${e.seq}" ${openErr.has(e.seq) ? "" : "hidden"}><td colspan="${3 + T.length + (T.length > 1 ? 1 : 0)}">${
+      h += `<tr class="errrow" data-seq="${e.seq}" ${open.has(e.seq) ? "" : "hidden"}><td colspan="${3 + T.length + (T.length > 1 ? 1 : 0)}">${
         failed.map(t => { const i = T.indexOf(t); return `<div class="who" style="color:${TC(i)}">${esc(t.label)} · ${e.id} · ${e.results[t.label].status}</div>
           <pre class="err">${esc(e.results[t.label].error)}</pre>`; }).join("")}</td></tr>`;
     }
   });
-  document.getElementById("recent").innerHTML = hist.length ? h + "</table>" : `<div class="empty">Finished rounds appear here, newest first.</div>`;
+  return h + "</table>";
+}
+function renderRecent() {
+  const all = S.history || [], hist = all.slice(0, 5);
+  document.getElementById("recentTitle").innerHTML = (hist.length ? `Recent rounds (last ${hist.length})` : "Recent rounds") +
+    (all.length > hist.length ? ` <a class="seemore" href="#" onclick="openRounds(); return false;">see more (last ${all.length})</a>` : "");
+  const seqs = hist.map(h => h.seq).join();
+  if (seqs === shownSeqs) return;
+  const fresh = shownSeqs ? new Set(hist.map(h => h.seq).filter(s => !shownSeqs.split(",").includes(String(s)))) : new Set();
+  document.getElementById("recent").innerHTML = hist.length ? recentTable(hist, fresh, openErr) : `<div class="empty">Finished rounds appear here, newest first.</div>`;
   shownSeqs = seqs;
-  const kept = new Set(hist.map(x => x.seq));
+  const kept = new Set(all.map(x => x.seq));
   [...openErr].forEach(s => kept.has(s) || openErr.delete(s));
+}
+/* "see more": the last 25 rounds in the pop-up, refreshed while it is open */
+let roundsOpen = false, roundsShown = "";
+function openRounds() {
+  qOpen = null; QD = null; clearInterval(qTimer);
+  roundsOpen = true; roundsShown = "";
+  document.getElementById("qmodal").hidden = false;
+  renderRoundsModal();
+}
+function renderRoundsModal() {
+  if (!roundsOpen || !S) return;
+  const hist = S.history || [], seqs = hist.map(h => h.seq).join();
+  if (seqs === roundsShown) return;
+  document.getElementById("qbox").innerHTML = `<button class="x" title="Close (Esc)" onclick="closeQuery()">×</button>
+    <h3>Last ${hist.length} rounds</h3>
+    <div class="meta">newest first · click a query for its details, SQL and times · click an error or timeout to read it</div>
+    <div style="margin-top:.8rem">${hist.length ? recentTable(hist, new Set(), openErr) : '<div class="empty">No finished rounds yet.</div>'}</div>`;
+  roundsShown = seqs;
 }
 
 /* ---------- long-term chart: geometric mean of every full pass, last 24 h ---------- */
@@ -585,10 +611,11 @@ function drawLongTerm() {
   if (hi / lo < 100) hi = lo * 100;
   const X = t => L + (t - x0) / span * (W - L - R), Y = v => TOP + (1 - (Math.log10(v) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * (H - TOP - B);
   let h = "";
+  const decadePx = (H - TOP - B) / Math.log10(hi / lo), allLabels = decadePx > 3.2 * rem;   // 2 and 5 only when they fit
   for (let d = lo; d <= hi * 1.001; d *= 10) {
     [1, 2, 5].forEach(m => { const v = d * m; if (v > hi * 1.001) return;
       h += `<line class="gl" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" ${m === 1 ? "" : 'stroke-dasharray="2 4"'}/>`;
-      if (m === 1 || hi / lo <= 1000) h += `<text class="ax" x="${L - 0.4 * rem}" y="${Y(v) + 0.3 * rem}" text-anchor="end">${fmtT(v)}</text>`; });
+      if (m === 1 || allLabels) h += `<text class="ax" x="${L - 0.4 * rem}" y="${Y(v) + 0.3 * rem}" text-anchor="end">${fmtT(v)}</text>`; });
   }
   const hour = 3600, first = Math.ceil(x0 / hour) * hour, step = span > 12 * hour ? 2 * hour : hour;
   for (let t = first; t <= now; t += hour) {
@@ -686,6 +713,7 @@ function sideBySide(ta, tb) {                  // rows of [left html, left class
   return rows;
 }
 async function openQuery(id) {
+  roundsOpen = false;
   qOpen = id;
   document.getElementById("qmodal").hidden = false;
   await loadQuery();
@@ -693,7 +721,7 @@ async function openQuery(id) {
   qTimer = setInterval(loadQuery, 10000);
 }
 function closeQuery() {
-  qOpen = null; QD = null;
+  qOpen = null; QD = null; roundsOpen = false;
   clearInterval(qTimer);
   document.getElementById("qmodal").hidden = true;
 }
@@ -793,9 +821,21 @@ function drawQueryChart() {
   svg.innerHTML = h;
 }
 document.getElementById("perq").addEventListener("click", ev => { const r = ev.target.closest("[data-q]"); if (r) openQuery(r.dataset.q); });
-document.getElementById("recent").addEventListener("click", ev => { const r = ev.target.closest(".qlink"); if (r) openQuery(r.dataset.q); });
+/* query links and error toggles, on the board and in the pop-up's round list */
+function roundsClick(ev) {
+  const q = ev.target.closest(".qlink");
+  if (q) { openQuery(q.dataset.q); return; }
+  const link = ev.target.closest(".errlink");
+  if (!link) return;
+  const seq = Number(link.dataset.seq), row = link.closest("table").querySelector(`tr.errrow[data-seq="${seq}"]`);
+  if (!row) return;
+  row.hidden = !row.hidden;
+  row.hidden ? openErr.delete(seq) : openErr.add(seq);
+}
+document.getElementById("recent").addEventListener("click", roundsClick);
+document.getElementById("qbox").addEventListener("click", ev => { if (roundsOpen) roundsClick(ev); });
 document.getElementById("qmodal").addEventListener("click", ev => { if (ev.target.id === "qmodal") closeQuery(); });
-document.addEventListener("keydown", ev => { if (ev.key === "Escape" && qOpen) closeQuery(); });
+document.addEventListener("keydown", ev => { if (ev.key === "Escape" && (qOpen || roundsOpen)) closeQuery(); });
 
 async function poll() {
   try {
@@ -804,19 +844,12 @@ async function poll() {
     render();
     await loadPasses();
     drawLongTerm();
+    renderRoundsModal();
   } catch (e) {
     document.getElementById("pill").textContent = "disconnected";
   }
   setTimeout(poll, 1000);
 }
-document.getElementById("recent").addEventListener("click", ev => {
-  const link = ev.target.closest(".errlink");
-  if (!link) return;
-  const seq = Number(link.dataset.seq), row = document.querySelector(`#recent tr.errrow[data-seq="${seq}"]`);
-  if (!row) return;
-  row.hidden = !row.hidden;
-  row.hidden ? openErr.delete(seq) : openErr.add(seq);
-});
 document.getElementById("toggle").onclick = async () => {
   await fetch(S && S.running ? "api/pause" : "api/resume", {method: "POST"});
 };
