@@ -125,7 +125,8 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .bar { height: 0.5rem; border-radius: 99px; background: var(--grid); margin: 0.6rem 0 0.4rem; overflow: hidden; }
 .bar > div { height: 100%; background: var(--tc); border-radius: 99px; transition: width .4s; }
 .status { font-weight: 700; }
-.status.ok { color: var(--good); } .status.error, .status.unsupported { color: var(--critical); } .status.timeout { color: var(--warning); }
+.status.ok { color: var(--good); } .status.error, .status.unsupported { color: var(--critical); }
+.status.timeout, .status.unavailable { color: var(--warning); }
 .result { overflow: hidden; margin-top: 0.3rem; max-height: 10.2rem; }   /* header + 5 rows */
 .result table { border-collapse: collapse; font-size: 0.85rem; width: 100%; }
 .result th, .result td { padding: 0.2rem 0.6rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
@@ -257,7 +258,7 @@ table.t tr.qrow:hover td { background: var(--surface-2); }
 <script>
 let S = null, built = 0, roundKey = null, shownSeqs = "", openErr = new Set();
 const TC = i => `var(--t${i % 4})`;
-const ICON = {ok: "✓", error: "✕", timeout: "⏱", unsupported: "–"};
+const ICON = {ok: "✓", error: "✕", timeout: "⏱", unsupported: "–", unavailable: "⚠"};
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
 function fmtT(s) {
   if (s === null || s === undefined) return "–";
@@ -406,7 +407,11 @@ function render() {
 
   /* targets */
   S.targets.forEach((t, i) => {
-    document.getElementById("tsub" + i).textContent = `${t.server_version} · ${t.host || t.target}${t.cpus ? " · " + t.cpus + " CPUs" : ""} · data to ${t.data_to}`;
+    const sub = document.getElementById("tsub" + i);
+    sub.textContent = t.unavailable ? `⚠ unavailable, retrying: ${t.unavailable}`
+      : `${t.server_version} · ${t.host || t.target}${t.cpus ? " · " + t.cpus + " CPUs" : ""} · data to ${t.data_to}`;
+    sub.className = "sub" + (t.unavailable ? " warn" : "");
+    sub.title = t.unavailable || "";
     const [lv, lu] = fmtLag(t.lag), lagEl = document.getElementById("lag" + i);
     lagEl.className = "v num " + lagClass(t.lag);
     lagEl.innerHTML = t.lag === null || t.lag === undefined ? "–" : `${lv}<small>${lu}</small>`;

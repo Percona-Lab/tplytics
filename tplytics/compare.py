@@ -109,11 +109,19 @@ class CommonState:
     minutes) is behind the others.
     """
 
-    def __init__(self, states):
-        self.states = states
+    def __init__(self, sources):
+        self.sources = sources          # DatabaseState objects, or Targets whose state may be None yet
+
+    @property
+    def states(self):
+        out = [getattr(s, "state", s) for s in self.sources]
+        out = [s for s in out if s is not None]
+        if not out:
+            raise RuntimeError("no target has answered yet")
+        return out
 
     def __getattr__(self, name):
-        if name in ("t_min", "t_max", "span_seconds"):
+        if name in ("t_min", "t_max", "span_seconds", "sources", "states"):
             raise AttributeError(name)
         return getattr(self.states[0], name)
 
@@ -348,15 +356,21 @@ def _dialect_used(q, engine):
 
 # =================================================================== targets
 class Target:
+    """One system under test. Its size and time range are read when it first
+    answers; a target that does not answer at start (down, or refusing the
+    discovery queries) is retried in the background instead of stopping the
+    dashboard, and its rounds are reported as unavailable meanwhile."""
+    RETRY = 30.0
+
     def __init__(self, opts, refresh):
         self.opts = opts
         self.label = opts.label
         self.engine = get_engine(opts.engine, opts)
-        session = self.engine.connect()
-        self.server_version = session.server_version
-        self.state = DatabaseState(session)
-        session.close()
-        self.refresher = StateRefresher(self.engine, self.state, refresh) if refresh > 0 else None
+        self.refresh = refresh
+        self.state = None
+        self.error = "not connected yet"
+        self.server_version = "?"
+        self.refresher = None
         self.status = {"lag": None, "lag_state": "starting", "series": [], "system_stats": False,
                        "host": None, "cpus": None}
         self.lag_series = collections.deque(maxlen=LAG_POINTS)
@@ -369,6 +383,32 @@ class Target:
 
     def describe(self):
         return self.engine.describe()
+
+    def discover(self):
+        """Read the target's size and time range; True once it has answered."""
+        session = None
+        try:
+            session = self.engine.connect()
+            self.server_version = session.server_version
+            self.state = DatabaseState(session)
+            self.error = None
+        except Exception as e:  # noqa: BLE001 - reported, retried
+            self.error = str(e).replace("\n", " ")[:300]
+            return False
+        finally:
+            if session is not None:
+                session.close()
+        if self.refresh > 0:
+            self.refresher = StateRefresher(self.engine, self.state, self.refresh)
+            self.refresher.start()
+        return True
+
+    def start_discovery(self):
+        def retry():
+            while not self.discover():
+                time.sleep(self.RETRY)
+            print("target %s answered: %s" % (self.label, self.state.summary()), flush=True)
+        threading.Thread(target=retry, daemon=True, name="discover-%s" % self.label).start()
 
 
 class StatusPoller(threading.Thread):
@@ -437,7 +477,7 @@ class CompareLoop(threading.Thread):
         super().__init__(daemon=True, name="compare-loop")
         self.args, self.targets = args, targets
         self.queries = [q for q in queries if any(q.supported(t.engine) for t in targets)]
-        self.state = CommonState([t.state for t in targets])
+        self.state = CommonState(targets)
         self.runners = {t.label: Runner(t.engine, args.timeout, t.opts.init_sql or []) for t in targets}
         self.lock = threading.Lock()
         self.running = threading.Event()
@@ -497,6 +537,9 @@ class CompareLoop(threading.Thread):
             if self.next_start:
                 self._wait_until(self.next_start)
             self.running.wait()
+            if all(t.state is None for t in self.targets):
+                time.sleep(5)                 # nothing to draw parameters from yet
+                continue
             q = self._pick()
             try:
                 values = q.new_params(self.state, self.rng)
@@ -512,6 +555,9 @@ class CompareLoop(threading.Thread):
                 elif not q.supported(t.engine):
                     res.update(state="done", status="unsupported", error="not supported by %s" % t.engine.name,
                                elapsed=None, rows=0, sql="")
+                elif t.state is None:
+                    res.update(state="done", status="unavailable", elapsed=None, rows=0, sql="",
+                               error="target unavailable (retried every %ds): %s" % (Target.RETRY, t.error))
                 else:
                     res["sql"] = q.render(t.engine, values)
                     th = threading.Thread(target=self._run_one, args=(t, q, res["sql"], values, res), daemon=True)
@@ -610,7 +656,7 @@ def make_handler(loop, targets, local, primary, args):
             "version": __version__, "host": socket.gethostname(), "now": time.time(),
             "running": loop.running.is_set(), "timeout": args.timeout, "interval": args.interval,
             "order": args.order, "title": args.title,
-            "database": targets[0].state.summary().split(";")[0],
+            "database": next((t.state.summary().split(";")[0] for t in targets if t.state), "waiting for the targets"),
             "common_window": "%s to %s (%s)" % (common.t_min.strftime("%H:%M:%S"),
                                                 common.t_max.strftime("%Y-%m-%d %H:%M:%S"),
                                                 human_duration(common.span_seconds)),
@@ -627,7 +673,8 @@ def make_handler(loop, targets, local, primary, args):
             d["targets"].append({
                 "label": t.label, "engine": t.engine.name, "server_version": t.server_version,
                 "target": t.describe(), "status_url": t.opts.status_url,
-                "data_to": t.state.t_max.strftime("%Y-%m-%d %H:%M:%S"), **st})
+                "data_to": t.state.t_max.strftime("%Y-%m-%d %H:%M:%S") if t.state else "unavailable",
+                "unavailable": None if t.state else t.error, **st})
         return d
 
     class Handler(BaseHTTPRequestHandler):
@@ -731,26 +778,27 @@ def compare(args):
     apply_weights(queries, args.set_weight, "concurrent")
     targets = []
     for spec in target_specs:
-        try:
-            targets.append(Target(spec, args.refresh))
-        except SystemExit:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise SystemExit("cannot connect to target %s: %s" % (spec.label, e))
-        print("target %-20s %s (%s): %s" % (targets[-1].label, targets[-1].describe(), targets[-1].server_version,
-                                            targets[-1].state.summary()), flush=True)
+        t = Target(spec, args.refresh)
+        targets.append(t)
+        if t.discover():
+            print("target %-20s %s (%s): %s" % (t.label, t.describe(), t.server_version, t.state.summary()), flush=True)
+        else:
+            print("target %-20s %s does not answer yet, retrying every %ds: %s"
+                  % (t.label, t.describe(), Target.RETRY, t.error), flush=True)
+            t.start_discovery()
     loop = CompareLoop(args, targets, queries)
     if not loop.queries:
         raise SystemExit("no query is supported by any target")
     for r in loop.runners.values():
-        r.connect()
+        try:
+            r.connect()
+        except Exception:  # noqa: BLE001 - the runner reconnects on its next query
+            r.session = None
     pengine = get_engine(primary.engine, primary) if primary else None
     local = Sampler(pengine, args.system_stats == "auto")
     local.start()
     for t in targets:
         StatusPoller(t).start()
-        if t.refresher:
-            t.refresher.start()
     loop.start()
     server = ThreadingHTTPServer((args.listen, args.http_port), make_handler(loop, targets, local, primary, args))
     host = "localhost" if args.listen in ("0.0.0.0", "") else args.listen
