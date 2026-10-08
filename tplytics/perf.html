@@ -23,7 +23,7 @@
     --good: #1a8a4a; --warning: #b77900; --critical: #d03b3b; --accent: #2a78d6;
   }
 }
-html { font-size: clamp(11px, 0.68vw, 26px); }
+html { font-size: clamp(12px, 0.72vw, 28px); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text-primary); font: 1rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .wrap { padding: 0.7rem 1.2rem 1.2rem; }
@@ -31,14 +31,18 @@ header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1.2r
 header h1 { font-size: 1.5rem; margin: 0; }
 header .meta { color: var(--text-secondary); font-size: 0.95rem; flex: 1 1 20rem; }
 header a { color: var(--accent); text-decoration: none; font-weight: 600; }
-.nodes { display: grid; gap: 1rem; align-items: start; }
-.node { min-width: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+/* one node after another, each the full width */
+.nodes { display: flex; flex-direction: column; gap: 1.6rem; }
+.node { min-width: 0; display: flex; flex-direction: column; gap: 0.6rem; scroll-margin-top: 0.6rem; }
+.jump { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.jump a { font-weight: 650; text-decoration: none; padding: 0.15rem 0.7rem; border-radius: 99px; border: 1px solid var(--line); color: var(--nc); }
 .nhead { background: var(--surface-1); border: 1px solid var(--line); border-top: 0.35rem solid var(--nc); border-radius: 0.7rem; padding: 0.6rem 0.9rem; }
-.nhead .name { font-size: 1.5rem; font-weight: 800; color: var(--nc); }
+.nhead { display: flex; align-items: baseline; gap: 0.4rem 1.2rem; flex-wrap: wrap; }
+.nhead .name { font-size: 1.7rem; font-weight: 800; color: var(--nc); }
 .nhead .sub { color: var(--text-secondary); font-size: 0.9rem; }
 .nhead .err { color: var(--critical); font-size: 0.9rem; margin-top: 0.3rem; }
 h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin: 0.4rem 0 0; font-weight: 700; }
-.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: 0.6rem; }
 .card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.45rem 0.7rem 0.4rem; min-width: 0; position: relative; }
 .card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; }
 .card .k { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -48,20 +52,24 @@ h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .06em; color:
 .card .legend i { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 2px; margin: 0 0.2rem 0 0.45rem; vertical-align: baseline; }
 .card .legend i:first-child { margin-left: 0; }
 .card .legend b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
-svg.ch { display: block; width: 100%; height: 3.4rem; margin-top: 0.2rem; overflow: visible; }
+svg.ch { display: block; width: 100%; height: 5.2rem; margin-top: 0.2rem; overflow: visible; }
 svg.ch .gl { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
 svg.ch .ln { fill: none; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 svg.ch .ar { opacity: .8; stroke: none; }
-.ymax { position: absolute; right: 0.7rem; bottom: 3.55rem; font-size: 0.65rem; color: var(--muted); pointer-events: none; }
-table.u { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.ymax { position: absolute; right: 0.7rem; bottom: 5.35rem; font-size: 0.65rem; color: var(--muted); pointer-events: none; }
+table.u { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 table.u th, table.u td { padding: 0.22rem 0.5rem; border-top: 1px solid var(--line); white-space: nowrap; }
 table.u th { text-align: left; color: var(--text-secondary); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
 table.u td.n, table.u th.n { text-align: right; font-variant-numeric: tabular-nums; }
-table.u td.nm { overflow: hidden; text-overflow: ellipsis; max-width: 12rem; }
-table.u svg { width: 6.5rem; height: 1.3rem; display: block; }
+table.u td.nm { overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
+table.u td.nm b { font-weight: 650; }
+table.u td.nm span { color: var(--text-secondary); }
+table.u td.sp { width: 22%; }
+table.u svg { width: 100%; height: 1.9rem; display: block; }
+.up { color: var(--critical); } .down { color: var(--good); }
 .bar { display: inline-block; height: 0.5rem; border-radius: 99px; background: var(--nc); vertical-align: middle; margin-left: 0.3rem; opacity: .8; }
 .empty { color: var(--muted); padding: 0.6rem; font-size: 0.9rem; }
-@media (max-width: 1100px) { .nodes { grid-template-columns: minmax(0, 1fr) !important; } html { font-size: 13px; } }
+@media (max-width: 900px) { html { font-size: 13px; } table.u td.sp { display: none; } }
 </style>
 </head>
 <body>
@@ -69,6 +77,7 @@ table.u svg { width: 6.5rem; height: 1.3rem; display: block; }
   <header>
     <h1 id="title">Performance</h1>
     <div class="meta" id="meta">loading…</div>
+    <div class="jump" id="jump"></div>
     <a href="./">← back to the comparison</a>
   </header>
   <div class="nodes" id="nodes"></div>
@@ -164,25 +173,32 @@ function drawCard(nid, m, n) {
   el.querySelector(".ymax").textContent = ymax === null ? "" : "max " + fmt(ymax, ymax < 10 ? 1 : 0);
 }
 function unitsHtml(n, i) {
-  const u = Object.entries(n.units || {}).sort((a, b) => b[1].cpu_avg - a[1].cpu_avg || b[1].mem_mb - a[1].mem_mb).slice(0, 10);
+  const u = Object.entries(n.units || {}).sort((a, b) => b[1].cpu_avg - a[1].cpu_avg || b[1].mem_mb - a[1].mem_mb).slice(0, 12);
   if (!u.length) return `<div class="empty">No service or container data (cgroup v2 not readable).</div>`;
-  const maxMem = Math.max(...u.map(x => x[1].mem_mb), 1);
-  return `<table class="u"><tr><th>Service / container</th><th class="n">CPU now</th><th class="n">avg</th><th class="n">max</th><th>CPU, 15 min</th><th class="n">Memory</th></tr>` +
+  const span = n.series && n.series.length > 1 ? Math.round((n.series[n.series.length - 1].t - n.series[0].t) / 60) : 0;
+  return `<table class="u"><tr><th>Service / container · main process</th><th class="n">CPU now</th><th class="n">avg</th><th class="n">max</th><th>CPU, last ${span} min</th>
+      <th class="n">Memory now</th><th class="n">min – max</th><th class="n">change</th><th>Memory, last ${span} min</th></tr>` +
     u.map(([name, x]) => {
-      const pts = x.points.map(p => ({t: p[0], cpu: p[1]}));
-      const {svg} = chart(pts, [{f: "cpu", c: NC(i)}], {max: Math.max(100, niceMax(x.cpu_max))});
-      return `<tr><td class="nm" title="${esc(name)}">${esc(name)}</td><td class="n">${fmt(x.cpu, 0)}%</td><td class="n">${fmt(x.cpu_avg, 0)}%</td><td class="n">${fmt(x.cpu_max, 0)}%</td>
-        <td><svg viewBox="0 0 300 50" preserveAspectRatio="none">${svg}</svg></td>
-        <td class="n">${bytesMB(x.mem_mb)}<span class="bar" style="width:${(3 * x.mem_mb / maxMem).toFixed(2)}rem;--nc:${NC(i)}"></span></td></tr>`;
-    }).join("") + `</table><div class="empty" style="padding:.3rem 0 0">CPU in % of one CPU (${n.cpus} CPUs = ${n.cpus * 100}%). Idle units under 64 MB are hidden.</div>`;
+      const pts = x.points.map(p => ({t: p[0], cpu: p[1], mem: p[2]}));
+      const cpu = chart(pts, [{f: "cpu", c: NC(i)}], {max: Math.max(100, niceMax(x.cpu_max))});
+      const lo = Math.max(0, x.mem_min - (x.mem_max - x.mem_min) * 0.5 - 1);
+      const mem = chart(pts.map(p => ({...p, m: p.mem - lo})), [{f: "m", c: "var(--c5)"}], {max: niceMax((x.mem_max - lo) * 1.05)});
+      const ch = x.mem_change, cls = ch > 0 ? "up" : ch < 0 ? "down" : "";
+      return `<tr><td class="nm" title="${esc(name)}${x.main ? " — main process " + esc(x.main) : ""}"><b>${esc(name)}</b>${x.main ? ` <span>· ${esc(x.main)}${x.procs > 1 ? ` +${x.procs - 1}` : ""}</span>` : ""}</td>
+        <td class="n">${fmt(x.cpu, 0)}%</td><td class="n">${fmt(x.cpu_avg, 0)}%</td><td class="n">${fmt(x.cpu_max, 0)}%</td>
+        <td class="sp"><svg viewBox="0 0 300 50" preserveAspectRatio="none">${cpu.svg}</svg></td>
+        <td class="n"><b>${bytesMB(x.mem_mb)}</b></td><td class="n">${bytesMB(x.mem_min)} – ${bytesMB(x.mem_max)}</td>
+        <td class="n ${cls}">${ch > 0 ? "+" : ch < 0 ? "−" : "±"}${bytesMB(Math.abs(ch))}</td>
+        <td class="sp"><svg viewBox="0 0 300 50" preserveAspectRatio="none">${mem.svg}</svg></td></tr>`;
+    }).join("") + `</table><div class="empty" style="padding:.3rem 0 0">CPU in % of one CPU (${n.cpus} CPUs = ${n.cpus * 100}%). The memory chart is zoomed to its own range, so small changes show. Idle units under 64 MB are hidden.</div>`;
 }
 function dbMetrics(n) { return n.db_kind === "dbtrail" ? DBTRAIL : (n.db_kind === "mysql" || n.db_kind === "mariadb") ? MYSQL : []; }
 function build() {
   const el = document.getElementById("nodes");
-  el.style.gridTemplateColumns = `repeat(${D.nodes.length}, minmax(0, 1fr))`;
+  document.getElementById("jump").innerHTML = D.nodes.map((n, i) => `<a href="#node${i}" style="--nc:${NC(i)}">${esc(n.label)}</a>`).join("");
   el.innerHTML = D.nodes.map((n, i) => {
     const nid = "n" + i, db = dbMetrics(n);
-    return `<div class="node" style="--nc:${NC(i)}"><div class="nhead"><div class="name">${esc(n.label)}</div><div class="sub" id="${nid}-sub"></div><div class="err" id="${nid}-err"></div></div>
+    return `<div class="node" id="node${i}" style="--nc:${NC(i)}"><div class="nhead"><div class="name">${esc(n.label)}</div><div class="sub" id="${nid}-sub"></div><div class="err" id="${nid}-err"></div></div>
       <h2>Operating system</h2><div class="grid">${OS.filter(m => !m.need || m.need(n)).map(m => cardHtml(nid, m)).join("")}</div>
       ${db.length ? `<h2>Database · ${n.db_kind === "dbtrail" ? "DBTrail capture and index" : esc(n.db_kind)}</h2><div class="grid">${db.map(m => cardHtml(nid, m)).join("")}</div>` : ""}
       <h2>Services and containers</h2><div class="card" id="${nid}-units"></div></div>`;

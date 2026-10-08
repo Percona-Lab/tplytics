@@ -117,6 +117,33 @@ def _docker_name(cid):
         return "container " + cid[:12]
 
 
+def unit_cgroup(name, names_cache):
+    """The cgroup directory of a unit name as read_units reports it."""
+    if name.startswith("container "):
+        cid = next((k for k, v in names_cache.items() if v == name), None)
+        return os.path.join(CG, "system.slice", "docker-%s.scope" % cid) if cid else None
+    return os.path.join(CG, "system.slice", name + ".service")
+
+
+def main_process(cgdir):
+    """(command name, processes) of a cgroup: the process using the most memory names it."""
+    try:
+        with open(os.path.join(cgdir, "cgroup.procs")) as fh:
+            pids = [x.strip() for x in fh if x.strip()]
+    except OSError:
+        return None, 0
+    best, best_rss = None, -1
+    for pid in pids[:400]:
+        try:
+            rss = int(_read("/proc/%s/statm" % pid).split()[1])
+            comm = _read("/proc/%s/comm" % pid).strip()
+        except (IndexError, ValueError):
+            continue
+        if rss > best_rss:
+            best, best_rss = comm, rss
+    return best, len(pids)
+
+
 def read_units(names_cache):
     """{unit name: (cpu usage µs, memory bytes)} for services and containers."""
     out = {}
@@ -324,8 +351,12 @@ class PerfSampler(threading.Thread):
                 last = pts[-1]
                 if max(cpu) < 0.5 and last[2] < 64:
                     continue                      # idle and small: not worth a row
+                mem = [x[2] for x in pts]
+                main, nprocs = main_process(unit_cgroup(name, self.names) or "")
                 units[name] = {"cpu": last[1], "mem_mb": last[2], "cpu_avg": round(sum(cpu) / len(cpu), 1),
-                               "cpu_max": max(cpu), "points": [[x[0], x[1], x[2]] for x in pts]}
+                               "cpu_max": max(cpu), "mem_min": min(mem), "mem_max": max(mem),
+                               "mem_change": mem[-1] - mem[0], "main": main, "procs": nprocs,
+                               "points": [[x[0], x[1], x[2]] for x in pts]}
             mem_total = 0
             for line in _read("/proc/meminfo").splitlines():
                 if line.startswith("MemTotal:"):
