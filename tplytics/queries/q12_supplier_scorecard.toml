@@ -1,4 +1,4 @@
-id = "Q21"
+id = "Q12"
 name = "Company-wide supplier scorecard"
 complexity = 4
 tables = ["order_line"]

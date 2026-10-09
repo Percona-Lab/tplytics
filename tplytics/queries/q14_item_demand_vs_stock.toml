@@ -1,0 +1,41 @@
+id = "Q14"
+name = "Company-wide item demand vs stock"
+complexity = 4
+tables = ["order_line", "stock", "item"]
+description = """
+Which items sell fastest relative to what the company holds? Totals the units
+ordered of every item over all order lines stored, compares them with the units
+on hand of that item summed over every warehouse, and lists the items with the
+lowest cover (stock / demand) together with their price and brand share.
+Two full-table aggregations (order_line and stock) joined on the item.
+"""
+weight = { serial = 0.5, concurrent = 0.5 }
+
+[params]
+min_qty = { type = "choice", values = [1, 1, 5] }
+top = { type = "choice", values = [20, 50] }
+
+[sql]
+default = """
+WITH demand AS (
+  SELECT ol_i_id AS i_id, SUM(ol_quantity) AS units, COUNT(*) AS order_lines,
+         SUM(CASE WHEN ol_delivery_d IS NULL THEN ol_quantity ELSE 0 END) AS pending_units
+  FROM   order_line
+  WHERE  ol_quantity >= {min_qty}
+  GROUP  BY ol_i_id
+), supply AS (
+  SELECT s_i_id AS i_id, SUM(s_quantity) AS on_hand, SUM(s_ytd) AS shipped_ytd,
+         SUM(CASE WHEN s_data LIKE '%ORIGINAL%' THEN 1 ELSE 0 END) AS brand_warehouses
+  FROM   stock
+  GROUP  BY s_i_id
+)
+SELECT i.i_id, i.i_name, i.i_price,
+       d.units, d.order_lines, d.pending_units,
+       s.on_hand, s.shipped_ytd, s.brand_warehouses,
+       ROUND(1.0 * s.on_hand / d.units, 3) AS cover_ratio
+FROM   demand d
+JOIN   supply s ON s.i_id = d.i_id
+JOIN   item i   ON i.i_id = d.i_id
+ORDER  BY cover_ratio, d.units DESC, i.i_id
+LIMIT  {top}
+"""

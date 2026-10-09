@@ -1,4 +1,4 @@
-id = "Q20"
+id = "Q11"
 name = "Market basket analysis"
 complexity = 4
 tables = ["district", "order_line", "item"]
@@ -7,14 +7,14 @@ Which items are bought together? Takes the latest orders of a slice of
 warehouses, self-joins their order lines to count item pairs that appear in
 the same order, and reports the strongest pairs with support, confidence and
 lift (how much more often the pair occurs than chance would predict).
-The heaviest query: a self-join that grows quadratically with order size,
+The heaviest join: a self-join that grows quadratically with order size,
 several CTEs referenced more than once and a final join to item.
 """
 weight = { serial = 1, concurrent = 1 }
 
 [params]
-wh = { type = "warehouse_range", fraction = [0.02, 0.1], min = 1, max = 8 }
-last = { type = "choice", values = [250, 500, 1000] }
+wh = { type = "warehouse_range", fraction = [0.05, 0.15], min = 1 }
+last = { type = "choice", values = [500, 1000, 2000] }
 min_support = { type = "choice", values = [2, 3] }
 top = { type = "choice", values = [10, 20] }
 

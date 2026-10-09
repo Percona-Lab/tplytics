@@ -1,4 +1,4 @@
-id = "Q19"
+id = "Q10"
 name = "Stock-out risk"
 complexity = 3
 tables = ["district", "order_line", "stock", "item"]
@@ -12,7 +12,7 @@ CTE aggregation over district + order_line joined to stock and item.
 weight = { serial = 1, concurrent = 2 }
 
 [params]
-wh = { type = "warehouse_range", fraction = [0.05, 0.25], min = 1, max = 25 }
+wh = { type = "warehouse_range", fraction = [0.1, 0.4], min = 1 }
 last = { type = "choice", values = [500, 1000, 2000] }
 cover = { type = "choice", values = [1, 2, 3] }
 top = { type = "choice", values = [20, 50] }

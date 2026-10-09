@@ -1,4 +1,4 @@
-id = "Q08"
+id = "Q04"
 name = "Sales trend"
 complexity = 2
 tables = ["orders", "order_line"]
@@ -12,8 +12,8 @@ through the primary key and filtered on time.
 weight = { serial = 2, concurrent = 5 }
 
 [params]
-wh = { type = "warehouse_range", fraction = [0.05, 0.25], min = 1, max = 50 }
-win = { type = "time_window", fraction = [0.05, 0.5], anchor = "mixed", buckets = 24 }
+wh = { type = "warehouse_range", fraction = [0.25, 0.75], min = 1 }
+win = { type = "time_window", fraction = [0.1, 0.6], anchor = "mixed", buckets = 24 }
 
 [sql]
 mysql = """

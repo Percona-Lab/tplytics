@@ -32,8 +32,9 @@ class OfflineTests(unittest.TestCase):
         self.engines = [cls(opts) for cls in ENGINES.values()]
 
     def test_unique_queries(self):
-        self.assertEqual(len(self.queries), 22)
-        self.assertEqual(len({q.id for q in self.queries}), 22)
+        self.assertEqual(len(self.queries), 14)
+        # numbered Q01..Q14 without gaps, so sequential order and the per-query history line up
+        self.assertEqual([q.id for q in self.queries], ["Q%02d" % i for i in range(1, 15)])
 
     def test_render_all_engines(self):
         rng = random.Random(1)
@@ -77,7 +78,7 @@ class OfflineTests(unittest.TestCase):
         e = ENGINES["dbtrail"](types.SimpleNamespace(schema=None))
         by_id = {q.id: q for q in self.queries}
         rng = random.Random(1)
-        for qid, fn in (("Q05", "time_bucket"), ("Q08", "time_bucket"), ("Q10", "date_diff")):
+        for qid, fn in (("Q04", "time_bucket"), ("Q13", "time_bucket")):
             sql = by_id[qid].render(e, by_id[qid].new_params(fake_state(), rng))
             self.assertIn(fn, sql, qid)
             self.assertNotIn("UNIX_TIMESTAMP", sql, qid)

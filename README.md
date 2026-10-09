@@ -6,8 +6,9 @@ workload. It is meant to run **at the same time as HammerDB**, so you can see
 how an OLTP database copes when reporting queries hit the tables it is
 writing to, and how much each workload slows the other down.
 
-* 22 analytical queries with a business meaning, from single-table lookups to
-  multi-join, window-function, self-join and whole-table-scan queries.
+* 14 analytical queries with a business meaning, from millisecond single-table
+  lookups to multi-join, window-function, self-join and whole-table-scan
+  queries that take minutes on a row store.
 * Every query has a **weight** for serial mode and one for concurrent mode, so
   cheap queries can run more often than expensive ones.
 * Parameters are drawn **fresh for every execution** from the database itself:
@@ -63,13 +64,13 @@ shows the execution time, the number of rows and the first 5 rows of the result.
 A summary table follows at the end.
 
 ```
-./tplytics.py demo -q Q09,Q20 --pause          # selected queries, wait for Enter between them
+./tplytics.py demo -q Q05,Q11 --pause          # selected queries, wait for Enter between them
 ./tplytics.py demo --variants 3 --show-rows 10 # three parameter variants per query, 10 rows each
 ```
 
 ```
 ====================================================================================================
-Q19  Stock-out risk   [complexity 3, weight serial 1 / concurrent 2, tables: district, order_line, stock, item]
+Q10  Stock-out risk   [complexity 3, weight serial 1 / concurrent 2, tables: district, order_line, stock, item]
 ----------------------------------------------------------------------------------------------------
 Which items will run out first? Measures recent demand per supplying
 warehouse and item from the latest orders of a slice of warehouses, ...
@@ -167,7 +168,7 @@ At most one query starts every `--interval` seconds (10 by default), and every
 result stays the current query for at least `--min-display` seconds (5), so people
 have time to read it. **Pause** stops the loop after the current query, and
 **Resume** continues it. `--order weighted` picks queries at random by their
-concurrent weight instead of going through Q01..Q20 in turn.
+concurrent weight instead of going through Q01..Q14 in turn.
 
 ```
 ./tplytics.py dashboard --defaults-file ~/.my.cnf                         # http://127.0.0.1:8080/
@@ -361,31 +362,31 @@ time windows will cover warehouses that HammerDB never touches.
 
 | id | name | cx | tables | serial w | conc w | question answered |
 |---|---|---|---|---|---|---|
-| Q01 | Warehouse leaderboard | 1 | district | 3 | 10 | Which warehouses take the most orders / payments? |
-| Q02 | Catalog price bands | 1 | item | 3 | 10 | How is the catalog priced; share of brand items per band |
-| Q03 | Stock health by warehouse | 1 | stock | 3 | 8 | Which warehouses have the most SKUs below a reorder point? |
-| Q04 | Customer credit profile | 1 | customer | 3 | 8 | Good vs bad credit customers: discount, balances |
-| Q05 | Payment activity over time | 1 | history | 2 | 4 | Payments per time bucket (full scan of history) |
-| Q06 | Delivery backlog | 1 | new_order | 3 | 10 | Undelivered orders per warehouse |
-| Q07 | Order line fulfilment status | 1 | order_line | 2 | 4 | Delivered vs pending value, remote supply share |
-| Q08 | Sales trend | 2 | orders, order_line | 2 | 5 | Orders, revenue and order size per time bucket |
-| Q09 | Best sellers | 2 | district, order_line, item | 2 | 5 | Top items in the latest orders |
-| Q10 | Carrier delivery performance | 2 | orders, order_line | 2 | 4 | Delivery delay per carrier |
-| Q11 | Payments by customer region | 2 | history, customer | 1 | 2 | Which customer states pay the most (whole database) |
-| Q12 | Cross-warehouse supply routes | 2 | district, order_line, warehouse | 2 | 4 | Busiest home → supplying warehouse routes |
-| Q13 | Brand vs generic sales | 2 | district, order_line, item, stock | 2 | 4 | Revenue split brand / generic (TPC-C ORIGINAL rule) |
-| Q14 | Customer value segments | 3 | orders, order_line, customer | 1 | 2 | Customers per spend segment and credit rating |
-| Q15 | Top customers per district | 3 | orders, order_line, customer | 1 | 2 | Top-K spenders per district (ROW_NUMBER) |
-| Q16 | Customer churn | 3 | orders, customer | 1 | 2 | Who ordered in the first half of a window but not the second (NOT EXISTS) |
-| Q17 | Order value deciles | 3 | orders, order_line | 1 | 2 | Order value distribution (NTILE) |
-| Q18 | District benchmarking | 3 | orders, order_line | 1 | 2 | Districts deviating most from their warehouse average |
-| Q19 | Stock-out risk | 3 | district, order_line, stock, item | 1 | 2 | Items whose stock covers less than recent demand |
-| Q20 | Market basket analysis | 4 | district, order_line, item | 1 | 1 | Item pairs bought together: support, confidence, lift |
-| Q21 | Company-wide supplier scorecard | 4 | order_line | 0.5 | 0.5 | Which warehouses fulfil the most demand (full scan of order_line) |
-| Q22 | Company-wide order intake trend | 4 | orders | 0.5 | 0.5 | Orders per time bucket for the whole company, running total (full scan of orders) |
+| Q01 | Warehouse leaderboard | 1 | district | 3 | 10 | Which warehouses take the most orders / payments? (2,000-row table: milliseconds) |
+| Q02 | Catalog price bands | 1 | item | 3 | 10 | How is the catalog priced; share of brand items per band (100 K rows) |
+| Q03 | Order line fulfilment status | 1 | order_line | 2 | 4 | Delivered vs pending value, remote supply share (5–25 % of warehouses) |
+| Q04 | Sales trend | 2 | orders, order_line | 2 | 5 | Orders, revenue and order size per time bucket |
+| Q05 | Best sellers | 2 | district, order_line, item | 2 | 5 | Top items in the latest orders |
+| Q06 | Customer value segments | 3 | orders, order_line, customer | 1 | 2 | Customers per spend segment and credit rating (LEFT JOIN keeps inactive customers) |
+| Q07 | Top customers per district | 3 | orders, order_line, customer | 1 | 2 | Top-K spenders per district (ROW_NUMBER), at most 500 rows |
+| Q08 | Customer churn | 3 | orders, customer | 1 | 2 | Who ordered in the first half of a window but not the second (NOT EXISTS) |
+| Q09 | Order value deciles | 3 | orders, order_line | 1 | 2 | Order value distribution (NTILE) |
+| Q10 | Stock-out risk | 3 | district, order_line, stock, item | 1 | 2 | Items whose stock covers less than recent demand |
+| Q11 | Market basket analysis | 4 | district, order_line, item | 1 | 1 | Item pairs bought together: support, confidence, lift |
+| Q12 | Company-wide supplier scorecard | 4 | order_line | 0.5 | 0.5 | Which warehouses fulfil the most demand (full scan of order_line) |
+| Q13 | Company-wide order intake trend | 4 | orders | 0.5 | 0.5 | Orders per time bucket for the whole company, running total (full scan of orders) |
+| Q14 | Company-wide item demand vs stock | 4 | order_line, stock, item | 0.5 | 0.5 | Items with the lowest stock cover (full scans of order_line and stock) |
 
 Complexity (cx): 1 = single table, 2 = join, 3 = CTEs / window functions /
 correlated subqueries over joins, 4 = heavy (self-join or full scan of a large table).
+
+The set covers each execution pattern once or twice instead of repeating
+one: Q01 and Q02 are fast lookups where a row store answers in milliseconds,
+Q03–Q11 are range scans, joins, CTEs, window functions, an anti-join and a
+self-join over slices of the data, and Q12–Q14 read whole tables. Measured on
+the lab (Percona Server 9.7 replica vs DBTrail 0.102, 200 warehouses, 5 runs
+each): MySQL is faster on Q01 (5 ms vs 0.15 s) and about equal on Q02, and
+DBTrail is 3.5–30× faster on the rest; geomean 8.8 s vs 1.3 s.
 
 ### How parameters adapt to the database
 
@@ -403,9 +404,9 @@ There are three time ranges, because on a running TPROC-C database they differ:
 | `delivered` | entry time of the orders already delivered | the oldest order still in `new_order` of the same districts: Delivery works oldest first, so with a backlog the delivered orders can be days older than the newest ones |
 | `history` | time of the stored payments | first and last row by `id` when history has one (Parma Ham adds it, and purges old payments), otherwise one scan of history |
 
-A query's time window names its source (`source = "history"` for the payment
-queries Q05 and Q11, `"delivered"` for the carrier query Q10, orders for the
-rest). Without it, a window could fall in hours whose payments were purged or
+A query's time window can name its source (`source = "history"` for a window
+over payments, `"delivered"` for one over delivered orders; the default is
+orders). Without it, a window could fall in hours whose payments were purged or
 whose orders were never delivered, and the query would read data to find
 nothing. Other parameters:
 
@@ -421,16 +422,18 @@ nothing. Other parameters:
   looks at current activity.
 * top-N, thresholds, sort columns and other choices are drawn from lists.
 
-Four queries deliberately read a whole table, and their cost grows with the
+Three queries deliberately read whole tables, and their cost grows with the
 size of the database and with the length of the HammerDB run:
 
-* Q05 and Q11 scan `history`, which has no index on its date.
-* Q21 scans all of `order_line`, the largest table (about 60 M rows at 200
-  warehouses; ~130 s on a 4 GB / 2 vCPU box).
-* Q22 scans all of `orders` (6 M rows at 200 warehouses; ~11 s).
+* Q12 scans all of `order_line`, the largest table (about 77 M rows at 200
+  warehouses after two days of Parma Ham; 1.5–4 min on an 8 GB / 4 vCPU
+  MySQL replica).
+* Q13 scans all of `orders` (7.7 M rows; ~11 s).
+* Q14 aggregates all of `order_line` and all of `stock` (20 M rows) and joins
+  them on the item (~3.5 min on the same replica).
 
-Q21 and Q22 have the lowest weights (0.5), so they run about once for every
-20 executions of the cheapest queries.
+They have the lowest weights (0.5), so in concurrent mode they run about once
+for every 20 executions of the cheapest queries.
 
 HammerDB specifics the queries respect: the loader writes `ol_amount = 0` for
 the orders delivered at load time, and all remote supply lines come from the
@@ -447,9 +450,10 @@ server, fed from its binlog, and its daemon can serve that copy on a MySQL
 protocol port (turn it on in the web interface under **Connect a SQL client**;
 the Docker Compose stack publishes it on `127.0.0.1:3309`). Statements on that
 port run in DuckDB, so `--engine dbtrail` tries `[sql].dbtrail`, then
-`[sql].duckdb`, then the MySQL text. Q05, Q08, Q10 and Q22 have DuckDB variants
-(`time_bucket` instead of `FROM_UNIXTIME(UNIX_TIMESTAMP())`, `date_diff`
-instead of `TIMESTAMPDIFF`); the other queries run unchanged.
+`[sql].duckdb`, then the MySQL text. Q04 and Q13 have DuckDB variants
+(`time_bucket` instead of `FROM_UNIXTIME(UNIX_TIMESTAMP())`); the other queries
+run unchanged. DBTrail refuses results of more than 1,000 rows, which is why
+Q07 ends with `LIMIT 500`.
 
 ```bash
 # user = the server's id in DBTrail, password = the port's password
@@ -499,7 +503,7 @@ report. A broken connection is re-opened, and the run continues in all cases.
 Every query is a TOML file in [`tplytics/queries/`](tplytics/queries):
 
 ```toml
-id = "Q10"
+id = "Q42"
 name = "Carrier delivery performance"
 complexity = 2
 tables = ["orders", "order_line"]
@@ -537,7 +541,7 @@ Parameter types:
 | `choice` | `{x}` | `values = [...]`; `raw = true` inserts an identifier unquoted |
 
 Use `--query-dir` to run your own set of query files. To change weights without
-editing the files, use `--set-weight Q20=0 --set-weight Q01=20`.
+editing the files, use `--set-weight Q11=0 --set-weight Q01=20`.
 
 ## Adding an engine
 
@@ -560,7 +564,7 @@ needs them. A new protocol needs a `Session` that implements `open`,
 ## Validation run
 
 Tested on a 4 GB / 2 vCPU Linode (Ubuntu 24.04), with HammerDB 6.0 running on the
-same machine:
+same machine, with the earlier 22-query set (ids differ from today's):
 
 | | Percona Server 9.7, 40 warehouses | PostgreSQL 16, 20 warehouses |
 |---|---|---|

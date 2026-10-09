@@ -1,4 +1,4 @@
-id = "Q16"
+id = "Q08"
 name = "Customer churn"
 complexity = 3
 tables = ["orders", "customer"]
@@ -14,8 +14,8 @@ to customer.
 weight = { serial = 1, concurrent = 2 }
 
 [params]
-wh = { type = "warehouse_range", fraction = [0.02, 0.1], min = 1, max = 10 }
-win = { type = "time_window", fraction = [0.2, 0.8], anchor = "recent" }
+wh = { type = "warehouse_range", fraction = [0.1, 0.3], min = 1 }
+win = { type = "time_window", fraction = [0.3, 0.9], anchor = "recent" }
 top = { type = "choice", values = [10, 20] }
 
 [sql]

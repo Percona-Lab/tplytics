@@ -1,4 +1,4 @@
-id = "Q09"
+id = "Q05"
 name = "Best sellers"
 complexity = 2
 tables = ["district", "order_line", "item"]
@@ -11,8 +11,8 @@ Join of district (to find the latest orders), order_line and item.
 weight = { serial = 2, concurrent = 5 }
 
 [params]
-wh = { type = "warehouse_range", fraction = [0.05, 0.25], min = 1, max = 25 }
-last = { type = "choice", values = [100, 250, 500, 1000, 2000] }
+wh = { type = "warehouse_range", fraction = [0.1, 0.4], min = 1 }
+last = { type = "choice", values = [500, 1000, 2000] }
 metric = { type = "choice", values = ["units", "revenue", "order_lines"], raw = true }
 top = { type = "choice", values = [10, 20, 50] }
 

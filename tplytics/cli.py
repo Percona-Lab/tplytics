@@ -144,7 +144,7 @@ def build_parser():
     p.add_argument("--min-display", type=float, default=5.0,
                    help="minimum seconds a finished query stays the current query (default 5)")
     p.add_argument("--order", choices=["sequential", "weighted"], default="sequential",
-                   help="sequential: Q01..Q20 in turn; weighted: random by concurrent weight")
+                   help="sequential: Q01, Q02, ... in turn; weighted: random by concurrent weight")
     p.add_argument("--history", type=int, default=10, help="finished queries listed at the bottom (default 10)")
     p.add_argument("--rounds", type=int, default=10,
                    help="completed rounds (one run of every query) listed at the bottom (default 10)")

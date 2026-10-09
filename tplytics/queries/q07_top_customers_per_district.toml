@@ -1,4 +1,4 @@
-id = "Q15"
+id = "Q07"
 name = "Top customers per district"
 complexity = 3
 tables = ["orders", "order_line", "customer"]
@@ -8,12 +8,13 @@ time window within each district of a slice of warehouses, keeps the top K
 per district and shows their name, credit rating, orders, spend and share of
 the district's revenue.
 Window functions (ROW_NUMBER and SUM OVER PARTITION) over an aggregated join.
+At most 500 rows are returned (DBTrail's SQL port refuses results over 1,000).
 """
 weight = { serial = 1, concurrent = 2 }
 
 [params]
-wh = { type = "warehouse_range", fraction = [0.02, 0.1], min = 1, max = 10 }
-win = { type = "time_window", fraction = [0.1, 0.6], anchor = "mixed" }
+wh = { type = "warehouse_range", fraction = [0.1, 0.3], min = 1 }
+win = { type = "time_window", fraction = [0.2, 0.8], anchor = "mixed" }
 top = { type = "choice", values = [1, 3, 5] }
 
 [sql]
@@ -45,4 +46,5 @@ FROM   ranked r
 JOIN   customer c ON c.c_w_id = r.w_id AND c.c_d_id = r.d_id AND c.c_id = r.c_id
 WHERE  r.rnk <= {top}
 ORDER  BY r.w_id, r.d_id, r.rnk
+LIMIT  500
 """

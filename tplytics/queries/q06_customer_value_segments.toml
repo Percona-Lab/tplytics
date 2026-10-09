@@ -1,4 +1,4 @@
-id = "Q14"
+id = "Q06"
 name = "Customer value segments"
 complexity = 3
 tables = ["orders", "order_line", "customer"]
@@ -13,8 +13,8 @@ CTE with aggregation over orders and order_line, outer-joined to customer.
 weight = { serial = 1, concurrent = 2 }
 
 [params]
-wh = { type = "warehouse_range", fraction = [0.02, 0.1], min = 1, max = 10 }
-win = { type = "time_window", fraction = [0.1, 0.6], anchor = "mixed" }
+wh = { type = "warehouse_range", fraction = [0.1, 0.3], min = 1 }
+win = { type = "time_window", fraction = [0.2, 0.8], anchor = "mixed" }
 low = { type = "choice", values = [1000, 2000, 3000] }
 high = { type = "choice", values = [6000, 8000, 10000] }
 

@@ -10,6 +10,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tplytics import compare as C  # noqa: E402
+from tplytics import params as P  # noqa: E402
 from tplytics import queries as Q  # noqa: E402
 from tplytics.state import DatabaseState, time_range  # noqa: E402
 
@@ -86,13 +87,15 @@ class StateTests(unittest.TestCase):
     def test_windows_fall_in_their_source(self):
         st = DatabaseState(FakeSession())
         rng = random.Random(1)
-        qs = {q.id: q for q in Q.load()}
-        for qid, src in (("Q05", "history"), ("Q11", "history"), ("Q10", "delivered"), ("Q08", "orders")):
+        for src in ("history", "delivered", "orders"):
             lo, hi = time_range(st, src)
+            spec = {"win": {"type": "time_window", "source": src, "fraction": [0.05, 0.5], "anchor": "mixed"}}
             for _ in range(50):
-                v = qs[qid].new_params(st, rng)
-                self.assertGreaterEqual(v["win_start"], lo - dt.timedelta(seconds=1), qid)
-                self.assertLessEqual(v["win_end"], hi + dt.timedelta(seconds=61), qid)
+                v = P.generate(spec, st, rng)
+                self.assertGreaterEqual(v["win_start"], lo - dt.timedelta(seconds=1), src)
+                self.assertLessEqual(v["win_end"], hi + dt.timedelta(seconds=61), src)
+        for q in Q.load():                       # every shipped query draws its parameters from this state
+            q.new_params(st, rng)
 
     def test_missing_source_falls_back_to_orders(self):
         st = types.SimpleNamespace(t_min=T0, t_max=T0 + dt.timedelta(hours=1), ranges={"history": None})
