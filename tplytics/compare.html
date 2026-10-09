@@ -395,8 +395,12 @@ function render() {
   if (built !== S.targets.length) build();
   document.getElementById("title").textContent = S.title;
   document.title = S.title;
-  document.getElementById("meta").textContent = `${S.database} · same query and parameters on every target, data window ${S.common_window} · ` +
+  const meta = document.getElementById("meta");
+  meta.textContent = `${S.database} · same query and parameters on every target, data window ${S.common_window} · ` +
     `${S.rounds} rounds · one round at most every ${S.interval}s · timeout ${S.timeout}s`;
+  if (S.data_ranges) meta.title = "Read from every target at the start of each full round" +
+    (S.state_refreshed ? ` (last at ${new Date(S.state_refreshed * 1000).toLocaleTimeString()})` : "") +
+    ":\n" + Object.values(S.data_ranges).join("\n");
   const pill = document.getElementById("pill"), b = document.getElementById("toggle");
   pill.textContent = S.running ? "running" : (S.current && S.current.state === "running" ? "pausing after this round" : "paused");
   b.textContent = S.running ? "Pause" : "Resume";

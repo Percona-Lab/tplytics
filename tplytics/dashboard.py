@@ -23,7 +23,7 @@ from . import __version__
 from . import params as P
 from .modes import fmt_value
 from .runner import Runner, OK
-from .state import StateRefresher
+from .state import refresh_state
 from .stats import geomean
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
@@ -180,6 +180,11 @@ class Loop(threading.Thread):
             if self.next_start:
                 self._wait_until(self.next_start)
             self.running.wait()
+            if self.round is None and self.executed:
+                # start of a round: every query of it draws from what the database holds now
+                err = refresh_state(self.ctx.engine, self.ctx.state)
+                if err:
+                    print("could not re-read the database, keeping the previous ranges: %s" % err, flush=True)
             q = self._pick()
             try:
                 values = q.new_params(self.ctx.state, self.rng)
@@ -315,9 +320,6 @@ def dashboard(ctx):
     loop.runner.connect()
     sampler = Sampler(ctx.engine, a.system_stats == "auto")
     sampler.start()
-    refresher = StateRefresher(ctx.engine, ctx.state, a.refresh) if a.refresh > 0 else None
-    if refresher:
-        refresher.start()
     loop.start()
     server = ThreadingHTTPServer((a.listen, a.http_port), make_handler(loop, sampler, ctx))
     host = "localhost" if a.listen in ("0.0.0.0", "") else a.listen
@@ -331,5 +333,3 @@ def dashboard(ctx):
         pass
     finally:
         server.server_close()
-        if refresher:
-            refresher.stop()

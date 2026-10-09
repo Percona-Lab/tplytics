@@ -6,13 +6,15 @@ description = """
 How fast does each carrier deliver? For orders entered in a time window in a
 slice of warehouses compares the carriers by delivered orders, lines and
 value and by the delay between order entry and delivery.
+The window falls in the time range of the orders already delivered, which
+can be far behind the newest orders while Delivery works through a backlog.
 Two-table join with date arithmetic, which differs between engines.
 """
 weight = { serial = 2, concurrent = 4 }
 
 [params]
 wh = { type = "warehouse_range", fraction = [0.05, 0.25], min = 1, max = 50 }
-win = { type = "time_window", fraction = [0.05, 0.5], anchor = "mixed" }
+win = { type = "time_window", source = "delivered", fraction = [0.05, 0.5], anchor = "mixed" }
 
 [sql]
 mysql = """

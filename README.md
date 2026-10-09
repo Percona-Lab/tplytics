@@ -11,8 +11,8 @@ writing to, and how much each workload slows the other down.
 * Every query has a **weight** for serial mode and one for concurrent mode, so
   cheap queries can run more often than expensive ones.
 * Parameters are drawn **fresh for every execution** from the database itself:
-  the number of warehouses, the item range and the time range of the stored
-  transactions. The same query never runs with the same parameters twice in a
+  the number of warehouses, the item range and the time ranges of the stored
+  orders, delivered orders and payments, read again before every round. The same query never runs with the same parameters twice in a
   row, and the benchmark works on any database size, whether HammerDB has been
   running for a minute or for a month.
 * Failed queries (syntax not supported, other errors) and **timeouts** (300 s
@@ -124,7 +124,7 @@ realistic concurrency (many sessions, most of them idle at any moment), and
 the expensive queries still don't dominate. `--think 0` (the default) runs
 flat out.
 
-While the benchmark runs, the database size and time range are read again
+While the benchmark runs, the database size and time ranges are read again
 every `--refresh` seconds (60 by default). New HammerDB orders are therefore
 included in the time windows. Statements still running when the time is up are
 cancelled and left out of the results.
@@ -186,8 +186,9 @@ the database is not a test system.
 `compare` is the dashboard for several targets at once, typically a MySQL
 replica and the DBTrail copy of the same primary. Every round runs one query,
 with the same parameters, on all targets at the same time; the parameters are
-drawn from the data every target has (the overlap of their time ranges), so
-the statements and the data they read are the same. The page, sized to fill a
+drawn from the data every target has (the overlap of their time ranges, read
+from every target at the start of each full round), so the statements and the
+data they read are the same. The page, sized to fill a
 16:9 screen from 1080p to 4K without scrolling, shows for each target:
 
 * **replication lag**, from the [heartbeat](#heartbeat-replication-lag);
@@ -357,19 +358,33 @@ correlated subqueries over joins, 4 = heavy (self-join or full scan of a large t
 
 ### How parameters adapt to the database
 
-At start-up, and again during concurrent runs, tplytics reads the warehouse,
-district, item and customer counts and the first and last order of a sample
-of districts. It only uses primary-key lookups, so this is cheap even on a
-very large database. Each query declares its parameters, and every execution
-draws them from that state:
+At start-up and again **before every round** (one run of every query: each
+pass of the dashboards, every N executions in serial mode, where N is the
+number of queries), tplytics reads the warehouse, district, item and customer
+counts and the time ranges the data covers. Concurrent mode has no rounds and
+re-reads them every `--refresh` seconds instead. Every execution of a round
+draws its parameters from that state, so they always fall where the data is.
+There are three time ranges, because on a running TPROC-C database they differ:
+
+| source | range | found from |
+|---|---|---|
+| `orders` | entry time of the stored orders | first and last order of a sample of districts (primary-key lookups) |
+| `delivered` | entry time of the orders already delivered | the oldest order still in `new_order` of the same districts: Delivery works oldest first, so with a backlog the delivered orders can be days older than the newest ones |
+| `history` | time of the stored payments | first and last row by `id` when history has one (Parma Ham adds it, and purges old payments), otherwise one scan of history |
+
+A query's time window names its source (`source = "history"` for the payment
+queries Q05 and Q11, `"delivered"` for the carrier query Q10, orders for the
+rest). Without it, a window could fall in hours whose payments were purged or
+whose orders were never delivered, and the query would read data to find
+nothing. Other parameters:
 
 * **warehouse slices** are a random contiguous range covering a fraction of all
   warehouses (e.g. 5–25 %), with a minimum and, for expensive queries, a
   maximum. The work per query therefore grows with the database but stays
   bounded.
-* **time windows** are a fraction of the time range actually stored. Half of
-  them end at the newest order ("recent", like a dashboard) and the other half
-  fall anywhere in the stored range. Their bucket size (minute, 5 minutes,
+* **time windows** are a fraction of their source's time range. Half of them
+  end at its newest row ("recent", like a dashboard) and the other half fall
+  anywhere in the range. Their bucket size (minute, 5 minutes,
   hour, …) is chosen to give about 24 buckets.
 * **"latest N orders per district"** is based on `d_next_o_id`, so it always
   looks at current activity.
@@ -486,7 +501,7 @@ Parameter types:
 | `warehouse` | `{x}` | |
 | `district` | `{x}` | |
 | `item_range` | `{x_lo}` `{x_hi}` `{x_count}` | `fraction`, `min`, `max` |
-| `time_window` | `{x_start}` `{x_mid}` `{x_end}` `{x_seconds}` `{x_bucket}` | `fraction`, `anchor` = recent / any / mixed, `min_seconds`, `buckets` |
+| `time_window` | `{x_start}` `{x_mid}` `{x_end}` `{x_seconds}` `{x_bucket}` | `fraction`, `source` = orders / delivered / history, `anchor` = recent / any / mixed, `min_seconds`, `buckets` |
 | `int` | `{x}` | `range = [lo, hi]` |
 | `choice` | `{x}` | `values = [...]`; `raw = true` inserts an identifier unquoted |
 

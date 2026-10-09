@@ -1,9 +1,9 @@
 """Query parameter generators.
 
 Each query declares its parameters in its TOML file; every execution draws a
-new set of values from the current DatabaseState so the benchmark adapts to
-the number of warehouses and to the time range of the stored transactions,
-and never runs exactly the same statement twice in a row.
+new set of values from the DatabaseState read at the start of the round, so
+the benchmark adapts to the number of warehouses and to the time ranges of the
+stored data, and never runs exactly the same statement twice in a row.
 
 Parameter types (``name = { type = "...", ... }``) and the placeholders
 they provide in the SQL text:
@@ -14,7 +14,9 @@ they provide in the SQL text:
   district         {name}                         1 .. districts per warehouse
   item_range       {name_lo} {name_hi}            fraction = [lo, hi] of the item ids
   time_window      {name_start} {name_mid} {name_end} {name_seconds} {name_bucket}
-                   fraction = [lo, hi] of the stored time range,
+                   fraction = [lo, hi] of the time range of `source`,
+                   source = "orders" (default) | "delivered" | "history"
+                   (see state.py: the window falls where that data is),
                    anchor = "recent" | "any" | "mixed", min_seconds = 60,
                    buckets = 24 (target number of buckets for {name_bucket})
   int              {name}   range = [lo, hi]
@@ -22,6 +24,8 @@ they provide in the SQL text:
                             (identifiers such as an ORDER BY column)
 """
 import datetime as dt
+
+from .state import time_range
 
 NICE_BUCKETS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800,
                 21600, 43200, 86400, 172800, 604800]
@@ -79,8 +83,8 @@ def generate(specs, state, rng):
 
 
 def _time_window(name, spec, state, rng):
-    t_min, t_max = state.t_min, state.t_max
-    span = state.span_seconds
+    t_min, t_max = time_range(state, spec.get("source", "orders"))
+    span = max(1.0, (t_max - t_min).total_seconds())
     lo_f, hi_f = spec.get("fraction", [0.05, 0.25])
     width = span * rng.uniform(lo_f, hi_f)
     width = min(span, max(float(spec.get("min_seconds", 60)), width))

@@ -128,7 +128,8 @@ def build_parser():
     p.add_argument("--think-jitter", type=float, default=0.5,
                    help="random +/- fraction applied to every pause (default 0.5)")
     p.add_argument("--refresh", type=float, default=60,
-                   help="seconds between re-reading the database size and time range (default 60, 0 = never)")
+                   help="seconds between re-reading the database size and time ranges (default 60, "
+                        "0 = never; the other modes re-read them before every round instead)")
     p.add_argument("--report-interval", type=float, default=10, help="progress line interval (default 10s)")
     p.add_argument("--raw", default=None, metavar="FILE", help="CSV log of every execution")
     p.set_defaults(func=modes.concurrent, mode="concurrent")
@@ -151,8 +152,6 @@ def build_parser():
                    help="CPU and disk charts from /proc of this host (auto: on Linux)")
     p.add_argument("--show-rows", type=int, default=5, help="result rows kept per query (default 5)")
     p.add_argument("--start-paused", action="store_true", help="wait for Resume in the browser")
-    p.add_argument("--refresh", type=float, default=60,
-                   help="seconds between re-reading the database size and time range (default 60)")
     p.set_defaults(func=run_dashboard, mode=None)
 
     p = sub.add_parser("heartbeat", formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -223,8 +222,6 @@ def build_parser():
                    help="finished rounds kept for 'see more' and the SQL pages (default and minimum 25)")
     g.add_argument("--show-rows", type=int, default=5, help="result rows kept per target (default 5)")
     g.add_argument("--start-paused", action="store_true", help="wait for Resume in the browser")
-    g.add_argument("--refresh", type=float, default=60,
-                   help="seconds between re-reading each target's size and time range (default 60)")
     g.add_argument("--system-stats", choices=["auto", "off"], default="auto",
                    help="CPU and disk load of this host (auto: on Linux)")
     g.add_argument("--history-file", default=None, metavar="FILE",

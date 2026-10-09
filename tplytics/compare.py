@@ -54,7 +54,7 @@ from .engines import get_engine
 from .heartbeat import DEFAULT_TABLE, lag_of, read_heartbeat
 from .modes import fmt_value
 from .runner import OK, TIMEOUT, Runner
-from .state import DatabaseState, StateRefresher, human_duration
+from .state import TIME_SOURCES, DatabaseState, describe_range, human_duration, refresh_state
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare.html")
 PERF_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "perf.html")
@@ -122,7 +122,7 @@ class CommonState:
         return out
 
     def __getattr__(self, name):
-        if name in ("t_min", "t_max", "span_seconds", "sources", "states"):
+        if name in ("t_min", "t_max", "span_seconds", "sources", "states", "ranges"):
             raise AttributeError(name)
         return getattr(self.states[0], name)
 
@@ -137,6 +137,21 @@ class CommonState:
     @property
     def span_seconds(self):
         return max(1.0, (self.t_max - self.t_min).total_seconds())
+
+    @property
+    def ranges(self):
+        """Per time source (state.TIME_SOURCES), the part of the range every target has."""
+        out = {}
+        for src in TIME_SOURCES:
+            rs = [(getattr(s, "ranges", None) or {}).get(src) for s in self.states]
+            if src == "orders":
+                rs = [(s.t_min, s.t_max) for s in self.states]
+            if any(r is None for r in rs):
+                out[src] = None
+                continue
+            lo = max(r[0] for r in rs)
+            out[src] = (lo, max(lo, min(r[1] for r in rs)))
+        return out
 
 
 # ================================================================ statistics
@@ -357,21 +372,21 @@ def _dialect_used(q, engine):
 
 # =================================================================== targets
 class Target:
-    """One system under test. Its size and time range are read when it first
-    answers; a target that does not answer at start (down, or refusing the
-    discovery queries) is retried in the background instead of stopping the
-    dashboard, and its rounds are reported as unavailable meanwhile."""
+    """One system under test. Its size and time ranges are read when it first
+    answers and again before every full round of queries; a target that does
+    not answer at start (down, or refusing the discovery queries) is retried in
+    the background instead of stopping the dashboard, and its rounds are
+    reported as unavailable meanwhile."""
     RETRY = 30.0
 
-    def __init__(self, opts, refresh):
+    def __init__(self, opts):
         self.opts = opts
         self.label = opts.label
         self.engine = get_engine(opts.engine, opts)
-        self.refresh = refresh
         self.state = None
         self.error = "not connected yet"
         self.server_version = "?"
-        self.refresher = None
+        self.refresh_error = None
         self.status = {"lag": None, "lag_state": "starting", "series": [], "system_stats": False,
                        "host": None, "cpus": None}
         self.lag_series = collections.deque(maxlen=LAG_POINTS)
@@ -399,10 +414,16 @@ class Target:
         finally:
             if session is not None:
                 session.close()
-        if self.refresh > 0:
-            self.refresher = StateRefresher(self.engine, self.state, self.refresh)
-            self.refresher.start()
         return True
+
+    def refresh_state(self):
+        """Read size and time ranges again (start of a round); on failure keep the last ones."""
+        if self.state is None:
+            return
+        self.refresh_error = refresh_state(self.engine, self.state)
+        if self.refresh_error:
+            print("target %s: could not re-read the database, keeping the previous ranges: %s"
+                  % (self.label, self.refresh_error), flush=True)
 
     def start_discovery(self):
         def retry():
@@ -488,6 +509,7 @@ class CompareLoop(threading.Thread):
         self.history = collections.deque(maxlen=max(args.history, 25))   # the "see more" list shows 25
         self.next_start = None
         self.rounds = 0
+        self.state_refreshed = time.time()
         self.rng = random.Random(args.seed)
         self.overall = {t.label: GeoStats() for t in targets}
         self.per_query = {q.id: {t.label: GeoStats() for t in targets} for q in self.queries}
@@ -515,6 +537,18 @@ class CompareLoop(threading.Thread):
                 return
             time.sleep(min(left, 0.2))
 
+    def _refresh_states(self):
+        """Start of a full round: every target reads its size and time ranges again, in parallel,
+        so all queries of the round draw their parameters from data every target has now."""
+        threads = [threading.Thread(target=t.refresh_state, daemon=True, name="refresh-%s" % t.label)
+                   for t in self.targets if t.state is not None]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        with self.lock:
+            self.state_refreshed = time.time()
+
     def _run_one(self, t, q, sql, values, res):
         r = self.runners[t.label].run(q.id, sql, keep_rows=self.args.show_rows, params=values)
         with self.lock:
@@ -541,6 +575,8 @@ class CompareLoop(threading.Thread):
             if all(t.state is None for t in self.targets):
                 time.sleep(5)                 # nothing to draw parameters from yet
                 continue
+            if self.rounds and self.rounds % len(self.queries) == 0:
+                self._refresh_states()
             q = self._pick()
             try:
                 values = q.new_params(self.state, self.rng)
@@ -684,6 +720,8 @@ def make_handler(loop, targets, local, primary, args, local_perf=None):
             "common_window": "%s to %s (%s)" % (common.t_min.strftime("%H:%M:%S"),
                                                 common.t_max.strftime("%Y-%m-%d %H:%M:%S"),
                                                 human_duration(common.span_seconds)),
+            "data_ranges": {src: describe_range(src, r) for src, r in common.ranges.items()},
+            "state_refreshed": loop.state_refreshed,
             "local": {"label": primary.label if primary else socket.gethostname(),
                       "host": socket.gethostname(), "cpus": os.cpu_count(),
                       "system_stats": local.system, "db_stats": local.db_enabled, "qps_stats": local.qps_enabled, "rows_stats": local.rows_enabled,
@@ -810,7 +848,7 @@ def compare(args):
     apply_weights(queries, args.set_weight, "concurrent")
     targets = []
     for spec in target_specs:
-        t = Target(spec, args.refresh)
+        t = Target(spec)
         targets.append(t)
         if t.discover():
             print("target %-20s %s (%s): %s" % (t.label, t.describe(), t.server_version, t.state.summary()), flush=True)

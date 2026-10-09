@@ -3,16 +3,17 @@ name = "Payments by customer region"
 complexity = 2
 tables = ["history", "customer"]
 description = """
-Which regions pay the most? Joins every payment in a time window to the
-paying customer and ranks customer states by amount paid, with the average
-payment and the part paid by bad-credit customers.
+Which regions pay the most? Joins every payment in a time window (inside the
+stored payment history) to the paying customer and ranks customer states by
+amount paid, with the average payment and the part paid by bad-credit
+customers.
 Whole-database query: full scan of history (no date index) plus a
 primary-key lookup into customer for every payment in the window.
 """
 weight = { serial = 1, concurrent = 2 }
 
 [params]
-win = { type = "time_window", fraction = [0.02, 0.2], anchor = "mixed" }
+win = { type = "time_window", source = "history", fraction = [0.02, 0.2], anchor = "mixed" }
 top = { type = "choice", values = [10, 20, 30] }
 
 [sql]

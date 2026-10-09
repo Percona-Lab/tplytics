@@ -11,7 +11,7 @@ import time
 from . import params as P
 from . import stats as S
 from .runner import Runner, OK, ERROR, TIMEOUT, CANCELLED
-from .state import StateRefresher
+from .state import StateRefresher, refresh_state
 
 
 def out(*a):
@@ -169,6 +169,11 @@ def serial(ctx):
     last_progress = started
     done = 0
     for i, q in enumerate(sequence):
+        if i and i % len(plan) == 0:
+            # a round is one execution per query: re-read the database before the next one
+            err = refresh_state(engine, state)
+            if err:
+                out("  could not re-read the database, keeping the previous ranges: %s" % err)
         r = runner.run_query(q, state, rng)
         st[q.id].add(r)
         raw.add(r)
