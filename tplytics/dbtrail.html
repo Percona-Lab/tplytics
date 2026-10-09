@@ -106,6 +106,13 @@ table.u tr.click:focus-visible td { outline: 2px solid var(--accent); outline-of
 .pill { display: inline-block; padding: 0 0.5rem; border-radius: 99px; font-size: 0.8rem; font-weight: 700; color: #fff; background: var(--muted); }
 .pill.ok { background: var(--good); } .pill.failed, .pill.error { background: var(--critical); } .pill.timeout, .pill.skipped { background: var(--warning); }
 .pill.dump { background: var(--c5); } .pill.refresh { background: var(--c1); } .pill.compact { background: var(--c6); }
+.pill.rewrite { background: var(--c2); } .pill.skip { background: transparent; color: var(--warning); border: 1px solid var(--warning); }
+.jobscroll { max-height: 26rem; overflow: auto; }
+.jobscroll table.u th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
+.rw { display: block; color: var(--text-secondary); }
+.rw b { color: var(--text-primary); font-weight: 600; }
+.jlegend { display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; font-size: 0.75rem; color: var(--text-secondary); margin: 0.2rem 0 0.4rem; }
+.jlegend i { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 2px; margin-right: 0.3rem; vertical-align: baseline; }
 svg.bars { display: block; width: 100%; height: 6rem; overflow: visible; }
 svg.bars .gl { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 2vh 2vw; }
@@ -141,7 +148,9 @@ svg.bars .gl { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-
         <div class="card" style="min-width:0"><h2 style="margin-top:0">Copy jobs <span id="jobsnote" style="text-transform:none;letter-spacing:0;font-weight:500"></span></h2>
           <svg class="bars" id="jobbars" viewBox="0 0 600 60" preserveAspectRatio="none"></svg>
           <div class="xax"><span id="jobx0"></span><span>now</span></div>
-          <div class="tw" id="jobs"></div></div>
+          <div class="jlegend"><span><i style="background:var(--c1)"></i>refresh</span><span><i style="background:var(--c2)"></i>refresh that rewrote a table in full</span>
+            <span><i style="background:var(--c5)"></i>full read</span><span><i style="background:var(--c6)"></i>compaction</span><span><i style="background:var(--critical)"></i>failed</span></div>
+          <div class="tw jobscroll" id="jobs"></div></div>
       </div>
       <h2>Benchmark query failures on DBTrail · latest 10 · click one for the SQL and the error</h2>
       <div class="card tw" id="fails"></div>
@@ -283,25 +292,54 @@ function renderSettings() {
   h += row("Disk", ca.free_bytes ? bytes(ca.free_bytes) + " free" : "–", ca.days_until_full ? `full in ${fmt(ca.days_until_full, 1)} days at this rate (capacity check: ${esc(ca.status || "?")})` : "");
   document.getElementById("settings").innerHTML = h;
 }
+const isSkip = j => j.outcome === "skipped";
+const rewrote = j => (j.rewrites || []).length > 0;
+function jobKind(j) { return j.kind === "dump" ? "full read" : j.kind; }
+function hhmm(t) { return new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false}); }
+function rewritesHtml(j) {
+  const rw = j.rewrites || [];
+  if (!rw.length) return "";
+  // group the tables by reason: a refresh that ends every chain rewrites ten tables for one reason
+  const by = {};
+  rw.forEach(r => (by[r.reason] = by[r.reason] || []).push(r));
+  return Object.entries(by).map(([reason, rs]) => {
+    rs.sort((a, b) => b.rows - a.rows);
+    const tables = rs.slice(0, 4).map(r => `<b>${esc(r.table)}</b> ${rows(r.rows)}`).join(", ") + (rs.length > 4 ? ` and ${rs.length - 4} more` : "");
+    return `<span class="rw">rewrote ${rs.length > 1 ? rs.length + " tables" : "table"} in full: ${tables} rows · ${esc(reason)}</span>`;
+  }).join("");
+}
+function rows(n) { return n >= 1e6 ? fmt(n / 1e6, n >= 1e7 ? 0 : 1) + " M" : n >= 1e3 ? fmt(n / 1e3, 0) + " K" : fmt(n); }
 function renderJobs() {
-  const I = D.info || {}, srv = (I.servers || [])[0] || {}, jobs = ((I.jobs || {})[srv.id] || []);
+  const I = D.info || {}, srv = (I.servers || [])[0] || {};
+  const jobs = ((I.jobs || {})[srv.id] || []).slice().sort((a, b) => (b.started || 0) - (a.started || 0));   // newest first by start
+  const every = (srv.schedule || {}).every, everyS = every ? ({s: 1, m: 60, h: 3600, d: 86400})[every.slice(-1)] * parseFloat(every) : 0;
   const el = document.getElementById("jobs");
   if (!jobs.length) { el.innerHTML = `<div class="empty">${esc((I.errors || {}).jobs || "No copy jobs in DBTrail's history.")}</div>`; document.getElementById("jobbars").innerHTML = ""; return; }
-  // bars: one per finished job over the history it covers, height = duration
-  const fin = jobs.filter(j => j.started && j.finished), t0 = Math.min(...fin.map(j => j.started)), span = Math.max(600, D.now - t0);
-  const ymax = niceMax(Math.max(...fin.map(j => j.seconds || 0)) * 1.1), W = 600, H = 60;
+  // bars: one per job that ran, over the history it covers, height = duration (skipped slots did not run)
+  const fin = jobs.filter(j => j.started && j.finished && !isSkip(j)), t0 = Math.min(...jobs.map(j => j.started)), span = Math.max(600, D.now - t0);
+  const ymax = niceMax(Math.max(1, ...fin.map(j => j.seconds || 0)) * 1.1), W = 600, H = 60;
   document.getElementById("jobbars").innerHTML = `<line class="gl" x1="0" x2="${W}" y1="${H - 0.5}" y2="${H - 0.5}"/>` + fin.map(j => {
     const x = (j.started - t0) / span * W, w = Math.max(2, (j.finished - j.started) / span * W), h = Math.max(1.5, (j.seconds || 0) / ymax * (H - 4));
-    const c = j.outcome !== "ok" ? "var(--critical)" : j.kind === "dump" ? "var(--c5)" : j.kind === "refresh" ? "var(--c1)" : "var(--c6)";
-    return `<rect x="${x.toFixed(1)}" y="${(H - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" style="fill:${c}"><title>${esc(j.kind)} ${when(j.started)} · ${dur(j.seconds)} · ${esc(j.outcome)}</title></rect>`;
+    const c = j.outcome !== "ok" ? "var(--critical)" : j.kind === "dump" ? "var(--c5)" : j.kind === "refresh" ? (rewrote(j) ? "var(--c2)" : "var(--c1)") : "var(--c6)";
+    return `<rect x="${x.toFixed(1)}" y="${(H - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" style="fill:${c}"><title>${esc(jobKind(j))} ${when(j.started)} · ${dur(j.seconds)} · ${esc(j.outcome)}${rewrote(j) ? " · rewrote " + j.rewrites.map(r => r.table).join(", ") : ""}</title></rect>`;
   }).join("");
   document.getElementById("jobx0").textContent = "−" + dur(span) + " · bar height = duration, tallest " + dur(ymax);
-  document.getElementById("jobsnote").textContent = `· ${jobs.length} latest from DBTrail's history`;
+  const nSkip = jobs.filter(isSkip).length;
+  document.getElementById("jobsnote").textContent = `· all ${jobs.length} entries in DBTrail's history (${jobs.length - nSkip} jobs, ${nSkip} skip records), times in your time zone`;
   el.innerHTML = `<table class="u"><tr><th>Job</th><th>Started</th><th class="n">Took</th><th>Outcome</th><th class="n">Changes / rows</th><th>Detail</th></tr>` +
-    jobs.slice(0, 12).map(j => `<tr><td><span class="pill ${esc(j.kind)}">${esc(j.kind === "dump" ? "full read" : j.kind)}</span></td><td>${when(j.started)}</td>
-      <td class="n">${dur(j.seconds)}</td><td><span class="pill ${esc(j.outcome)}">${esc(j.outcome)}</span></td>
-      <td class="n">${j.events !== null && j.events !== undefined ? fmt(j.events) + " changes" : j.rows ? fmt(j.rows) + " rows" : "–"}</td>
-      <td class="wrap">${esc(j.detail || j.why || "")}</td></tr>`).join("") + `</table>`;
+    jobs.map(j => {
+      if (isSkip(j)) {
+        // DBTrail keeps one record for a run of skipped slots: the first slot and the last
+        const n = everyS && j.finished > j.started ? Math.round((j.finished - j.started) / everyS) + 1 : 1;
+        const slots = n > 1 ? `${n} scheduled runs skipped (${hhmm(j.started)} – ${hhmm(j.finished)})` : `scheduled run skipped`;
+        return `<tr><td><span class="pill skip">skipped slot</span></td><td>${when(j.started)}</td><td class="n">–</td><td><span class="pill skipped">skipped</span></td>
+          <td class="n">–</td><td class="wrap">${slots}: ${esc(j.detail || "")}</td></tr>`;
+      }
+      return `<tr><td><span class="pill ${esc(j.kind)} ${rewrote(j) && j.kind === "refresh" ? "rewrite" : ""}">${esc(jobKind(j))}${rewrote(j) && j.kind === "refresh" ? " + rewrite" : ""}</span></td><td>${when(j.started)}</td>
+        <td class="n">${dur(j.seconds)}</td><td><span class="pill ${esc(j.outcome)}">${esc(j.outcome)}</span></td>
+        <td class="n">${j.events !== null && j.events !== undefined ? fmt(j.events) + " changes" : j.rows ? fmt(j.rows) + " rows" : "–"}</td>
+        <td class="wrap">${rewritesHtml(j)}${esc(j.detail || j.why || "")}</td></tr>`;
+    }).join("") + `</table>`;
 }
 function renderFails() {
   const F = D.failures || [], el = document.getElementById("fails");

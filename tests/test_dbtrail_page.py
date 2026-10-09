@@ -68,6 +68,25 @@ class DBTrailInfoTests(unittest.TestCase):
         self.assertEqual(jobs[2]["seconds"], 882.0)
         self.assertEqual(jobs[1]["events"], 7)
 
+
+    def test_rewrites_from_container_log(self):
+        line = ('{"log":"time=2026-10-09T20:07:56.640Z level=INFO msg=\\"table rewritten in full with deltas on\\" schema=tpcc '
+                'table=stock reason=\\"the changes beside the table (49 MB) passed 48 MB, the most a refresh leaves beside a '
+                'table for SQL on the copy\\" events_applied=8726 rows_written=20000000 fetch_ms=584 fold_ms=90\\n",'
+                '"stream":"stderr","time":"2026-10-09T20:07:56.640Z"}')
+        log = DI.RewriteLog()
+        log._parse(line)
+        log._parse('{"log":"time=2026-10-09T20:07:57Z level=INFO msg=\\"checkpoint saved\\"\\n"}')
+        self.assertEqual(len(log.events), 1)
+        e = log.events[0]
+        self.assertEqual((e["table"], e["rows"]), ("stock", 20000000))
+        self.assertEqual(e["reason"], "changes beside it reached 49 MB (limit 48 MB)")
+        self.assertEqual(len(log.within(e["t"] - 60, e["t"] + 60)), 1)
+        self.assertEqual(log.within(e["t"] + 10, e["t"] + 60), [])
+        self.assertEqual(DI.short_reason("the chain started at 2026-10-09T15:25:21Z, too close to the oldest events the index "
+                                         "keeps (chains that start at or before X are ended)"),
+                         "its changes reached the oldest events the index keeps")
+
     def test_unreachable_console_is_reported_not_fatal(self):
         doc = DI.DBTrailInfo("http://127.0.0.1:1").snapshot()
         self.assertIn("sql", doc["errors"])

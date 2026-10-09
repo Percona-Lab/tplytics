@@ -8,21 +8,29 @@ listen on localhost only) and served on /api/dbtrail:
   schedule, capacity of the index;
 * capture status (stream position, freshness, continuity) per server;
 * the latest copy jobs (full reads and refreshes) with their duration and
-  outcome, from DBTrail's own run history file.
+  outcome, from DBTrail's own run history file, and the tables each one
+  rewrote in full and why, from the container's log file (read directly,
+  so no access to the Docker API is needed).
 
 The API token comes from a file: either a plain token or DBTrail's .env file
 with a CONSOLE_TOKEN= line. Every part is best effort and cached for a few
 seconds; what cannot be read is reported, not fatal.
 """
+import collections
 import datetime as dt
 import glob
 import json
+import os
+import re
 import threading
 import time
 import urllib.request
 
 CACHE_SECONDS = 15
 JOBS_KEPT = 60
+LOG_FIRST_READ = 32 << 20        # at start, read at most the last 32 MB of the container log
+REWRITE_RE = re.compile(r'time=(\S+) .*msg="table rewritten in full[^"]*" schema=(\S+) table=(\S+) reason="([^"]*)"'
+                        r'.*?rows_written=(\d+)')
 
 
 def read_token(path):
@@ -49,8 +57,7 @@ def _ts(s):
     return d.timestamp()
 
 
-def container_started(name_part="bintrail"):
-    """(image, started epoch) of the Docker container whose name contains name_part, read from Docker's files."""
+def _container(name_part="bintrail"):
     for cfg in glob.glob("/var/lib/docker/containers/*/config.v2.json"):
         try:
             with open(cfg) as fh:
@@ -58,8 +65,78 @@ def container_started(name_part="bintrail"):
         except (OSError, ValueError):
             continue
         if name_part in c.get("Name", "") and c.get("State", {}).get("Running"):
-            return c.get("Config", {}).get("Image"), _ts(c["State"].get("StartedAt", "")[:26] + "Z")
-    return None, None
+            return c
+    return None
+
+
+def container_started(name_part="bintrail"):
+    """(image, started epoch) of the Docker container whose name contains name_part, read from Docker's files."""
+    c = _container(name_part)
+    if not c:
+        return None, None
+    return c.get("Config", {}).get("Image"), _ts(c["State"].get("StartedAt", "")[:26] + "Z")
+
+
+def short_reason(reason):
+    """DBTrail's reason for rewriting a table in full, in a few words."""
+    m = re.match(r"the changes beside the table \((\d+) MB\) passed (\d+) MB", reason)
+    if m:
+        return "changes beside it reached %s MB (limit %s MB)" % (m.group(1), m.group(2))
+    if "too close to the oldest events the index keeps" in reason:
+        return "its changes reached the oldest events the index keeps"
+    m = re.match(r"the changes beside the table \((\d+) bytes\) passed (\d+)% of the table", reason)
+    if m:
+        return "changes beside it passed %s%% of the table" % m.group(2)
+    return reason[:160]
+
+
+class RewriteLog:
+    """'table rewritten in full' events from DBTrail's container log (Docker json-file), read incrementally."""
+
+    def __init__(self, keep=400):
+        self.events = collections.deque(maxlen=keep)
+        self.path, self.inode, self.pos = None, None, 0
+        self.error = None
+
+    def _parse(self, line):
+        try:
+            text = json.loads(line).get("log", "")
+        except ValueError:
+            return
+        if "rewritten in full" not in text:
+            return
+        m = REWRITE_RE.search(text)
+        if m:
+            self.events.append({"t": _ts(m.group(1)), "table": m.group(3), "rows": int(m.group(5)),
+                                "reason": short_reason(m.group(4))})
+
+    def update(self):
+        c = _container()
+        path = c and c.get("LogPath")
+        if not path:
+            self.error = "DBTrail container log not found"
+            return
+        try:
+            st = os.stat(path)
+            if path != self.path or st.st_ino != self.inode or st.st_size < self.pos:
+                # new container or rotated file: start again from (the end of) the new file
+                self.path, self.inode, self.events = path, st.st_ino, collections.deque(maxlen=self.events.maxlen)
+                self.pos = max(0, st.st_size - LOG_FIRST_READ)
+            with open(path, "rb") as fh:
+                fh.seek(self.pos)
+                if self.pos:
+                    fh.readline()                       # skip a partial first line
+                for raw in fh:
+                    if not raw.endswith(b"\n"):
+                        break                           # a line still being written: next time
+                    self._parse(raw.decode("utf-8", "replace"))
+                    self.pos = fh.tell()
+            self.error = None
+        except OSError as e:
+            self.error = str(e)[:200]
+
+    def within(self, start, end):
+        return [e for e in self.events if e["t"] and start - 1 <= e["t"] <= end + 1]
 
 
 class DBTrailInfo:
@@ -69,6 +146,7 @@ class DBTrailInfo:
         self.history_file = history_file
         self.lock = threading.Lock()
         self.cached, self.cached_at = None, 0.0
+        self.rewrites = RewriteLog()
 
     def _get(self, path, timeout=10):
         req = urllib.request.Request(self.url + path)
@@ -100,6 +178,11 @@ class DBTrailInfo:
                              "trigger": e.get("trigger"), "why": e.get("why"),
                              "tables": e.get("tables"), "rows": e.get("rows"), "events": e.get("events")})
             out[sid] = list(reversed(jobs))
+        self.rewrites.update()
+        for jobs in out.values():
+            for j in jobs:
+                if j["outcome"] != "skipped" and j["started"] and j["finished"]:
+                    j["rewrites"] = self.rewrites.within(j["started"], j["finished"])
         return out
 
     def snapshot(self):
@@ -149,6 +232,8 @@ class DBTrailInfo:
             servers.append(row)
         doc["servers"] = servers
         part("jobs", lambda: self._jobs({s["id"] for s in servers}))
+        if self.rewrites.error:
+            doc["errors"]["log"] = self.rewrites.error
         # keep what the page shows: the version, not every capability and permission
         doc.pop("capabilities", None)
         doc.pop("backup", None)
