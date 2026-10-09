@@ -152,6 +152,12 @@ table.t td.n, table.t th.n { text-align: right; font-variant-numeric: tabular-nu
 table.t td.qn, table.t td.ql { overflow: hidden; text-overflow: ellipsis; }
 table.t tr.now td { background: var(--surface-2); }
 .sbar { display: inline-block; height: 0.55rem; border-radius: 99px; vertical-align: middle; margin-left: 0.4rem; }
+/* the queries with the largest and the smallest difference between the targets */
+.gap { display: inline-block; font-size: 0.72em; font-weight: 700; padding: 0 0.45em; border-radius: 99px; margin-right: 0.45em;
+       color: #fff; background: var(--gc); vertical-align: 0.1em; white-space: nowrap; }
+table.t tr.gaprow td { box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--gc) 45%, transparent), inset 0 1px 0 color-mix(in srgb, var(--gc) 45%, transparent); }
+table.t tr.gaprow td:first-child { box-shadow: inset 0.3rem 0 0 var(--gc), inset 0 -1px 0 color-mix(in srgb, var(--gc) 45%, transparent), inset 0 1px 0 color-mix(in srgb, var(--gc) 45%, transparent); }
+table.t tr.gaprow td.num { font-weight: 750; }
 tr.fresh { animation: slidein .6s ease-out; }
 #recent table.t th, #recent table.t td { padding-top: 0.16rem; padding-bottom: 0.16rem; }
 .seemore { font-size: 0.95em; font-weight: 600; color: var(--accent); text-transform: none; letter-spacing: 0; margin-left: 0.6rem; text-decoration: none; }
@@ -508,12 +514,25 @@ function renderPerQuery() {
   const T = S.targets, base = S.base, other = T.length > 1 ? T[1].label : null;
   const cur = S.current ? S.current.id : null;
   const maxR = Math.max(1, ...S.per_query.map(q => other && q.speedup[other] ? Math.log10(Math.max(q.speedup[other], 1)) : 0));
+  // mark the query where the second target gains most on the first, and the one where it gains least
+  const rated = other ? S.per_query.filter(q => q.speedup[other]) : [];
+  const gap = {};
+  if (rated.length >= 2) {
+    const hi = rated.reduce((a, q) => q.speedup[other] > a.speedup[other] ? q : a), lo = rated.reduce((a, q) => q.speedup[other] < a.speedup[other] ? q : a);
+    if (hi.speedup[other] !== lo.speedup[other]) {
+      gap[hi.id] = {text: `▲ ${other} best`, tip: `largest ${other} advantage over ${base} of all queries`, c: TC(1)};
+      gap[lo.id] = {text: `▼ ${other} worst`, c: lo.speedup[other] < 1 ? TC(0) : "var(--muted)",
+                    tip: lo.speedup[other] < 1 ? `${base} is ahead by the most here` : `smallest ${other} advantage of all queries`};
+    }
+  }
   let h = `<table class="t"><colgroup><col class="w-id"><col><col class="w-n">${T.map(() => `<col class="w-t">`).join("")}${other ? `<col class="w-r">` : ""}</colgroup>
     <tr><th>Q</th><th>Query</th><th class="n">Runs</th>${T.map((t, i) => `<th class="n" style="color:${TC(i)}">${esc(t.label)}</th>`).join("")}${
     other ? `<th title="${esc(other)} vs ${esc(base)}">${esc(other)} is</th>` : ""}</tr>`;
   S.per_query.forEach(q => {
     const runs = Math.max(...T.map(t => q.stats[t.label].runs));
-    h += `<tr class="qrow ${q.id === cur ? "now" : ""}" data-q="${q.id}" title="Details, SQL and times of ${q.id}"><td><b>${q.id}</b></td><td class="qn">${esc(q.name)}</td><td class="n">${runs}</td>`;
+    const g = gap[q.id];
+    h += `<tr class="qrow ${q.id === cur ? "now" : ""} ${g ? "gaprow" : ""}" ${g ? `style="--gc:${g.c}"` : ""} data-q="${q.id}" title="Details, SQL and times of ${q.id}"><td><b>${q.id}</b></td>` +
+      `<td class="qn">${g ? `<span class="gap" title="${esc(g.tip)}">${esc(g.text)}</span>` : ""}${esc(q.name)}</td><td class="n">${runs}</td>`;
     T.forEach(t => {
       const s = q.stats[t.label];
       h += `<td class="n">${!q.supported[t.label] ? '<span class="dim">n/a</span>' : s.ok ? fmtT(s.avg) : s.runs ? `<span class="crit">${s.errors ? "error" : "timeout"}</span>` : "–"}</td>`;
