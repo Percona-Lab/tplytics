@@ -244,7 +244,7 @@ def _fmt(x):
     return "-" if x is None else "%.3fs" % x
 
 
-def serve_http(monitor, listen, port, sampler=None, perf=None):
+def serve_http(monitor, listen, port, sampler=None, perf=None, dbtrail=None):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     class Handler(BaseHTTPRequestHandler):
@@ -255,6 +255,8 @@ def serve_http(monitor, listen, port, sampler=None, perf=None):
             elif path == "/api/perf" and perf is not None:
                 from urllib.parse import parse_qs, urlsplit
                 doc = perf.snapshot((parse_qs(urlsplit(self.path).query).get("range") or ["1h"])[0])
+            elif path == "/api/dbtrail" and dbtrail is not None:
+                doc = dbtrail.snapshot()
             elif path == "/api/system" and sampler is not None:
                 doc = {"host": socket.gethostname(), "cpus": os.cpu_count(), "system_stats": sampler.system,
                        "series": sampler.snapshot()}
@@ -292,7 +294,12 @@ def run_monitor(args, engine):
             perf = PerfSampler(None if args.prometheus_url else engine, prometheus_url=args.prometheus_url)
             perf.start()
             log("serving detailed performance on http://%s:%d/api/perf" % (args.listen, args.http_port))
-        serve_http(m, args.listen, args.http_port, sampler, perf)
+        info = None
+        if args.dbtrail_console:
+            from .dbtrail_info import DBTrailInfo
+            info = DBTrailInfo(args.dbtrail_console, args.dbtrail_token_file, args.dbtrail_history)
+            log("serving DBTrail version, settings and copy jobs on http://%s:%d/api/dbtrail" % (args.listen, args.http_port))
+        serve_http(m, args.listen, args.http_port, sampler, perf, info)
         if sampler is not None:
             log("serving this host's CPU and disk load on http://%s:%d/api/system" % (args.listen, args.http_port))
     skew = args.interval / 2 if args.skew is None else args.skew

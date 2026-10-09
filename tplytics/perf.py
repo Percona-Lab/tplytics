@@ -234,26 +234,51 @@ PROM_RATES = {"events_indexed": "bintrail_stream_events_indexed_total",
               "batch_flushes": "bintrail_stream_batch_flushes_total",
               "commit_latency_sum": "bintrail_stream_index_commit_latency_seconds_sum",
               "commit_latency_count": "bintrail_stream_index_commit_latency_seconds_count",
-              "sql_wait_sum": "bintrail_sql_slot_wait_seconds_sum"}
+              "sql_wait_sum": "bintrail_sql_slot_wait_seconds_sum",
+              "proc_cpu": "bintrail_process_cpu_seconds_total",
+              "dml_dropped": "bintrail_statement_dml_dropped_total",
+              "rows_dropped": "bintrail_unhandled_rows_dropped_total",
+              "checkpoints": "bintrail_stream_checkpoint_saves_total"}
 PROM_GAUGES = {"stream_lag": "bintrail_stream_availability_lag_seconds",
+               "replication_lag": "bintrail_stream_replication_lag_seconds",
                "index_bytes": "bintrail_index_storage_bytes", "index_events": "bintrail_index_events_total",
-               "sql_waiting": "bintrail_sql_slot_waiting"}
+               "index_gap_hours": "bintrail_index_gap_hours",
+               "rotation_healthy": "bintrail_rotation_healthy",
+               "gap_lost": "bintrail_continuity_gap_lost",
+               "sql_waiting": "bintrail_sql_slot_waiting",
+               "rss_bytes": "process_resident_memory_bytes"}
+# SQL on the copy: statements and time per phase (histogram _sum / _count by phase label)
+PROM_PHASES = ("total", "slot_wait", "spawn", "open", "views", "view_build", "query", "decode", "lockdown")
 
 
 def prometheus_sample(url):
     with urllib.request.urlopen(url, timeout=3) as r:
         text = r.read().decode("utf-8", "replace")
     vals = collections.defaultdict(float)
+    phase = collections.defaultdict(float)
     for line in text.splitlines():
         if not line or line.startswith("#"):
             continue
-        name = re.split(r"[{ ]", line, 1)[0]
+        name = re.split(r"[{ ]", line, maxsplit=1)[0]
         try:
-            vals[name] += float(line.rsplit(" ", 1)[1])
+            v = float(line.rsplit(" ", 1)[1])
         except (ValueError, IndexError):
             continue
-    return {"c": {k: vals.get(n, 0.0) for k, n in PROM_RATES.items()},
-            "g": {k: vals.get(n, 0.0) for k, n in PROM_GAUGES.items() if n in vals}}
+        vals[name] += v
+        if name.startswith("bintrail_sql_statement_phase_seconds_"):
+            m = re.search(r'phase="([^"]+)"', line)
+            if m and name.endswith(("_sum", "_count")):
+                phase[(m.group(1), name.rsplit("_", 1)[1])] += v
+    vals["bintrail_process_cpu_seconds_total"] = vals.get("process_cpu_seconds_total", 0.0)
+    c = {k: vals.get(n, 0.0) for k, n in PROM_RATES.items()}
+    for ph in PROM_PHASES:
+        if (ph, "count") in phase:
+            c["sqlph_%s_sum" % ph] = phase[(ph, "sum")]
+            c["sqlph_%s_count" % ph] = phase[(ph, "count")]
+    g = {k: vals.get(n, 0.0) for k, n in PROM_GAUGES.items() if n in vals}
+    if "process_start_time_seconds" in vals:
+        g["started"] = vals["process_start_time_seconds"]
+    return {"c": c, "g": g}
 
 
 # ================================================================== sampler
@@ -360,6 +385,18 @@ class PerfSampler(threading.Thread):
                 p["db_bp_hit"] = round(100.0 * (1 - p.get("db_bp_disk_reads", 0) / p["db_bp_requests"]), 3)
             if p.get("db_commit_latency_count"):
                 p["db_commit_latency_ms"] = round(1000 * p["db_commit_latency_sum"] / p["db_commit_latency_count"], 2)
+            if "db_proc_cpu" in p:
+                p["db_proc_cpu"] = round(100.0 * p["db_proc_cpu"], 1)          # % of one CPU
+            if "db_rss_bytes" in p:
+                p["db_rss_mb"] = round(p.pop("db_rss_bytes") / 1048576)
+            # SQL on the copy: statements/s and the average time per statement of each phase
+            n = p.get("db_sqlph_total_count")
+            if n is not None:
+                p["db_sql_per_s"] = n
+                for ph in PROM_PHASES:
+                    s, k = p.pop("db_sqlph_%s_sum" % ph, None), p.pop("db_sqlph_%s_count" % ph, None)
+                    if s is not None and k:
+                        p["db_sql_%s_s" % ph] = round(s / k, 3)
         ua, ub = a["units"], b["units"]
         with self.lock:
             self.series.append(p)

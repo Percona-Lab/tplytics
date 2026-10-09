@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DBTrail · tplytics compare</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0f0f0e; --surface-1: #191918; --surface-2: #212120; --text-primary: #ffffff; --text-secondary: #c3c2b7;
+  --muted: #8d8c85; --line: #2c2c2a; --grid: #2a2a28;
+  --c1: #3987e5; --c2: #e0a030; --c3: #ef6a6a; --c4: #3cb371; --c5: #b47ee5; --c6: #8d8c85;
+  --n0: #8d8c85; --n1: #3987e5; --n2: #e8743b;
+  --good: #3cb371; --warning: #e0a030; --critical: #ef6a6a; --accent: #3987e5;
+}
+@media (prefers-color-scheme: light) {
+  :root:where(:not([data-theme="dark"])) {
+    color-scheme: light;
+    --bg: #f2f3f5; --surface-1: #fcfcfb; --surface-2: #f5f5f2; --text-primary: #0b0b0b; --text-secondary: #52514e;
+    --muted: #7a7974; --line: #e1e0dc; --grid: #ebeae6;
+    --c1: #2a78d6; --c2: #b77900; --c3: #d03b3b; --c4: #1a8a4a; --c5: #8a52c7; --c6: #7a7974;
+    --n0: #7a7974; --n1: #2a78d6; --n2: #d95f22;
+    --good: #1a8a4a; --warning: #b77900; --critical: #d03b3b; --accent: #2a78d6;
+  }
+}
+html { font-size: clamp(12px, 0.72vw, 28px); }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary); font: 1rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { padding: 0.7rem 1.2rem 1.2rem; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1.2rem; margin-bottom: 0.7rem; }
+header h1 { font-size: 1.5rem; margin: 0; }
+header .meta { color: var(--text-secondary); font-size: 0.95rem; flex: 1 1 20rem; }
+header a { color: var(--accent); text-decoration: none; font-weight: 600; }
+/* one node after another, each the full width */
+.nodes { display: flex; flex-direction: column; gap: 1.6rem; }
+.node { min-width: 0; display: flex; flex-direction: column; gap: 0.6rem; scroll-margin-top: 0.6rem; }
+.jump { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.jump a { font-weight: 650; text-decoration: none; padding: 0.15rem 0.7rem; border-radius: 99px; border: 1px solid var(--line); color: var(--nc); }
+.nhead { background: var(--surface-1); border: 1px solid var(--line); border-top: 0.35rem solid var(--nc); border-radius: 0.7rem; padding: 0.6rem 0.9rem; }
+.nhead { display: flex; align-items: baseline; gap: 0.4rem 1.2rem; flex-wrap: wrap; }
+.nhead .name { font-size: 1.7rem; font-weight: 800; color: var(--nc); }
+.nhead .sub { color: var(--text-secondary); font-size: 0.9rem; }
+.nhead .err { color: var(--critical); font-size: 0.9rem; margin-top: 0.3rem; }
+h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin: 0.4rem 0 0; font-weight: 700; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+@media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.ranges { display: inline-flex; border: 1px solid var(--line); border-radius: 0.5rem; overflow: hidden; }
+.ranges button { font: inherit; font-weight: 650; background: var(--surface-1); color: var(--text-secondary); border: 0;
+                 border-left: 1px solid var(--line); padding: 0.3rem 0.9rem; cursor: pointer; }
+.ranges button:first-child { border-left: 0; }
+.ranges button.on { background: var(--accent); color: #fff; }
+.xax { display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--muted); margin-top: 0.1rem; }
+.card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.45rem 0.7rem 0.4rem; min-width: 0; position: relative; }
+.card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; }
+.card .k { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .v { font-size: 1.25rem; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.card .v small { font-size: 0.8rem; color: var(--text-secondary); font-weight: 500; margin-left: 0.15rem; }
+.card .legend { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.1em; }
+.card .legend i { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 2px; margin: 0 0.2rem 0 0.45rem; vertical-align: baseline; }
+.card .legend i:first-child { margin-left: 0; }
+.card .legend b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+svg.ch { display: block; width: 100%; height: 5.2rem; margin-top: 0.2rem; overflow: visible; }
+svg.ch .gl { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+svg.ch .ln { fill: none; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+svg.ch .ar { opacity: .8; stroke: none; }
+.ymax { position: absolute; right: 0.7rem; bottom: 6.3rem; font-size: 0.65rem; color: var(--muted); pointer-events: none; }
+table.u { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+table.u th, table.u td { padding: 0.22rem 0.5rem; border-top: 1px solid var(--line); white-space: nowrap; }
+table.u th { text-align: left; color: var(--text-secondary); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+table.u td.n, table.u th.n { text-align: right; font-variant-numeric: tabular-nums; }
+table.u td.nm { overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
+table.u td.nm b { font-weight: 650; }
+table.u td.nm span { color: var(--text-secondary); }
+table.u td.sp { width: 22%; }
+table.u svg { width: 100%; height: 1.9rem; display: block; }
+.up { color: var(--critical); } .down { color: var(--good); }
+.bar { display: inline-block; height: 0.5rem; border-radius: 99px; background: var(--nc); vertical-align: middle; margin-left: 0.3rem; opacity: .8; }
+.empty { color: var(--muted); padding: 0.6rem; font-size: 0.9rem; }
+@media (max-width: 900px) { html { font-size: 13px; } table.u td.sp { display: none; } }
+/* ---- /dbtrail additions ---- */
+:root { --code: #141413; }
+@media (prefers-color-scheme: light) { :root:where(:not([data-theme="dark"])) { --code: #f7f7f4; } }
+.summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.6rem; }
+@media (max-width: 1300px) { .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .summary { grid-template-columns: minmax(0, 1fr); } }
+.tile { background: var(--surface-1); border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.55rem 0.8rem; min-width: 0; border-top: 0.3rem solid var(--st, var(--line)); }
+.tile .k { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); font-weight: 700; }
+.tile .big { font-size: 1.7rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; overflow-wrap: anywhere; }
+.tile .big small { font-size: 0.9rem; font-weight: 500; color: var(--text-secondary); margin-left: 0.2rem; }
+.tile .sub { color: var(--text-secondary); font-size: 0.85rem; overflow-wrap: anywhere; }
+.st-good { --st: var(--good); } .st-warn { --st: var(--warning); } .st-bad { --st: var(--critical); }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 0.6rem; }
+@media (max-width: 1100px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+table.kv { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+table.kv td { padding: 0.25rem 0.5rem; border-top: 1px solid var(--line); vertical-align: top; }
+table.kv td:first-child { color: var(--text-secondary); white-space: nowrap; width: 1%; }
+table.kv td b { font-variant-numeric: tabular-nums; }
+table.kv td span { color: var(--text-secondary); }
+table.kv tr.grp td { border-top: 0; padding-top: 0.6rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; color: var(--text-secondary); }
+.tw { overflow-x: auto; }
+table.u td.wrap { white-space: normal; min-width: 14rem; color: var(--text-secondary); }
+table.u tr.click { cursor: pointer; }
+table.u tr.click:hover td { background: var(--surface-2); }
+table.u tr.click:focus-visible td { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pill { display: inline-block; padding: 0 0.5rem; border-radius: 99px; font-size: 0.8rem; font-weight: 700; color: #fff; background: var(--muted); }
+.pill.ok { background: var(--good); } .pill.failed, .pill.error { background: var(--critical); } .pill.timeout, .pill.skipped { background: var(--warning); }
+.pill.dump { background: var(--c5); } .pill.refresh { background: var(--c1); } .pill.compact { background: var(--c6); }
+svg.bars { display: block; width: 100%; height: 6rem; overflow: visible; }
+svg.bars .gl { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 2vh 2vw; }
+.modal-bg[hidden] { display: none; }
+.modal { background: var(--surface-1); border: 1px solid var(--line); border-radius: 0.9rem; width: min(96vw, 1400px); max-height: 94vh; overflow: auto;
+         padding: 1rem 1.3rem 1.2rem; font-size: max(13px, 1rem); position: relative; }
+.modal .x { position: absolute; top: 0.6rem; right: 0.8rem; font-size: 1.6em; line-height: 1; background: none; border: 0; color: var(--text-secondary); cursor: pointer; padding: 0.2rem 0.5rem; }
+.modal h3 { margin: 0 2.5rem 0.2rem 0; font-size: 1.5em; }
+.modal .meta { color: var(--text-secondary); font-size: 0.9em; }
+.modal h4 { font-size: 0.8em; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary); margin: 1rem 0 0.4rem; }
+.modal pre { margin: 0; padding: 0.6rem 0.8rem; overflow-x: auto; background: var(--code); border: 1px solid var(--line); border-radius: 0.5rem;
+             font: 0.85em/1.5 ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; white-space: pre; }
+.modal pre.err { white-space: pre-wrap; color: var(--critical); }
+.copy { font: inherit; font-size: 0.8em; margin-left: 0.6rem; background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--line); border-radius: 0.4rem; padding: 0.1rem 0.6rem; cursor: pointer; }
+.note { color: var(--muted); font-size: 0.82rem; margin-top: 0.3rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="title">DBTrail</h1>
+    <div class="meta" id="meta">loading…</div>
+    <div class="ranges" id="ranges"><button data-r="15m">15 min</button><button data-r="1h">1 h</button><button data-r="6h">6 h</button><button data-r="24h">24 h</button></div>
+    <a href="performance">Performance</a>
+    <a href="./">← back to the comparison</a>
+  </header>
+  <div class="nodes">
+    <div class="node">
+      <div class="err" id="errs" style="color:var(--critical)"></div>
+      <div class="summary" id="summary"></div>
+      <div class="cols">
+        <div class="card"><h2 style="margin-top:0">Settings</h2><table class="kv" id="settings"></table></div>
+        <div class="card" style="min-width:0"><h2 style="margin-top:0">Copy jobs <span id="jobsnote" style="text-transform:none;letter-spacing:0;font-weight:500"></span></h2>
+          <svg class="bars" id="jobbars" viewBox="0 0 600 60" preserveAspectRatio="none"></svg>
+          <div class="xax"><span id="jobx0"></span><span>now</span></div>
+          <div class="tw" id="jobs"></div></div>
+      </div>
+      <h2>Benchmark query failures on DBTrail · latest 10 · click one for the SQL and the error</h2>
+      <div class="card tw" id="fails"></div>
+      <h2>Capture and index</h2><div class="grid" id="g-capture"></div>
+      <h2>SQL on the copy</h2><div class="grid" id="g-sql"></div>
+      <h2>Process</h2><div class="grid" id="g-proc"></div>
+      <h2>Containers</h2><div class="card" id="units"></div>
+    </div>
+  </div>
+</div>
+<div class="modal-bg" id="fmodal" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="ftitle" id="fbox"></div></div>
+<script>
+let D = null;
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+function fmt(v, d = 0) { return v === null || v === undefined || Number.isNaN(+v) ? "–" : Number(v).toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d}); }
+function big(v, d, unit) { return `${fmt(v, d)}${unit ? `<small>${unit}</small>` : ""}`; }
+function niceMax(v) { if (!(v > 0)) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
+function bytes(b) { if (b === null || b === undefined) return "–"; const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (b >= 1024 && i < 4) { b /= 1024; i++; } return fmt(b, i >= 3 ? 1 : 0) + " " + u[i]; }
+function bytesMB(mb) { return mb >= 1024 ? fmt(mb / 1024, 1) + " GB" : fmt(mb, 0) + " MB"; }
+function dur(s) { if (s === null || s === undefined) return "–"; s = Math.max(0, s); if (s < 90) return fmt(s, s < 10 ? 1 : 0) + " s"; if (s < 5400) return fmt(s / 60, 1) + " min";
+  if (s < 172800) return fmt(s / 3600, 1) + " h"; return fmt(s / 86400, 1) + " days"; }
+function when(t) { if (!t) return "–"; const d = new Date(t * 1000); return d.toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}); }
+function ago(t) { return t ? dur(D.now - t) + " ago" : "–"; }
+
+let RANGE = "1h";
+try { RANGE = localStorage.getItem("tplytics-perf-range") || "1h"; } catch (e) {}
+const SPAN = {"15m": 900, "1h": 3600, "6h": 21600, "24h": 86400}, SPAN_TXT = {"15m": "15 min", "1h": "1 h", "6h": "6 h", "24h": "24 h"};
+function chart(pts, series, o = {}) {
+  const W = 300, H = 50, span = o.span || SPAN[RANGE], t1 = (D && D.now) || Date.now() / 1000, t0 = t1 - span;
+  const raw = (p, f) => typeof f === "function" ? f(p) : p[f];
+  pts = pts.filter(p => p.t >= t0 && series.some(s => { const v = raw(p, s.f); return v !== undefined && v !== null && !Number.isNaN(v); }));
+  if (pts.length < 2) return {svg: "", ymax: null};
+  const val = (p, f) => +raw(p, f) || 0;
+  const tot = p => o.stack ? series.reduce((a, s) => a + val(p, s.f), 0) : Math.max(...series.map(s => val(p, s.f)));
+  const ymax = o.max || niceMax(Math.max(...pts.map(tot)) * 1.1);
+  const X = i => Math.max(0, (pts[i].t - t0) / span * W), Y = v => H - 1 - Math.min(v, ymax) / ymax * (H - 3);
+  let h = `<line class="gl" x1="0" x2="${W}" y1="${H - 0.5}" y2="${H - 0.5}"/><line class="gl" x1="0" x2="${W}" y1="${Y(ymax / 2)}" y2="${Y(ymax / 2)}"/>`;
+  if (o.stack) {
+    let below = pts.map(() => 0);
+    series.forEach(s => {
+      const above = pts.map((p, i) => below[i] + val(p, s.f));
+      const top = above.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+      const back = below.map((v, i) => `L${X(i).toFixed(1)},${Y(v).toFixed(1)}`).reverse().join("");
+      h += `<path class="ar" style="fill:${s.c}" d="${top}${back}Z"/>`;
+      below = above;
+    });
+  } else {
+    series.forEach(s => { h += `<path class="ln" style="stroke:${s.c}" d="${pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(val(p, s.f)).toFixed(1)}`).join("")}"/>`; });
+  }
+  return {svg: h, ymax};
+}
+const ms = f => p => p[f] === undefined ? undefined : p[f] * 1000;
+const CAPTURE = [
+  {id: "ev", t: "Changes indexed/s", d: 0, s: [{f: "db_events_indexed", c: "var(--c1)", name: "indexed"}, {f: "db_events_received", c: "var(--c6)", name: "received"}]},
+  {id: "lag", t: "Capture lag", unit: "s", d: 1, s: [{f: "db_stream_lag", c: "var(--c2)", name: "availability"}, {f: "db_replication_lag", c: "var(--c3)", name: "replication"}]},
+  {id: "e2e", t: "End-to-end lag (heartbeat)", unit: "s", d: 1, span: 900, lag: 1, s: [{f: "lag", c: "var(--c5)", name: "lag, last 15 min"}]},
+  {id: "cl", t: "Index commit latency", unit: "ms", d: 1, s: [{f: "db_commit_latency_ms", c: "var(--c5)", name: "ms"}], extra: p => `${fmt(p.db_batch_flushes, 1)} flushes/s`},
+  {id: "ix", t: "Index size", unit: "GB", d: 2, s: [{f: p => p.db_index_bytes === undefined ? undefined : p.db_index_bytes / 1073741824, c: "var(--c4)", name: "GB"}],
+   extra: p => `${fmt((p.db_index_events || 0) / 1e6, 1)} M events`},
+  {id: "drop", t: "Changes dropped/s", d: 2, s: [{f: "db_dml_dropped", c: "var(--c3)", name: "statements"}, {f: "db_rows_dropped", c: "var(--c2)", name: "rows"}],
+   extra: p => `index gap ${fmt(p.db_index_gap_hours, 0)} h`},
+];
+const SQL = [
+  {id: "sps", t: "Statements/s", d: 2, s: [{f: "db_sql_per_s", c: "var(--c1)", name: "statements/s"}], extra: p => `waiting for a slot ${fmt(p.db_sql_waiting, 0)}`},
+  {id: "tot", t: "Average time per statement", unit: "ms", d: 0, s: [{f: ms("db_sql_total_s"), c: "var(--c4)", name: "total"}]},
+  // DBTrail's phases overlap (spawn covers the ones inside the child process), so they are lines, not a stack
+  {id: "ph", t: "Time per statement by phase", unit: "ms", d: 0, head: p => p.db_sql_query_s === undefined ? undefined : p.db_sql_query_s * 1000, s: [
+    {f: ms("db_sql_query_s"), c: "var(--c1)", name: "query"}, {f: ms("db_sql_spawn_s"), c: "var(--c6)", name: "spawn"},
+    {f: ms("db_sql_open_s"), c: "var(--c2)", name: "open"}, {f: ms("db_sql_views_s"), c: "var(--c5)", name: "views"},
+    {f: ms("db_sql_slot_wait_s"), c: "var(--c3)", name: "slot wait"}]},
+];
+const PROC = [
+  {id: "cpu", t: "DBTrail process CPU", unit: "%", d: 0, s: [{f: "db_proc_cpu", c: "var(--c1)", name: "% of one CPU"}]},
+  {id: "rss", t: "DBTrail process memory", unit: "MB", d: 0, s: [{f: "db_rss_mb", c: "var(--c5)", name: "resident MB"}]},
+  {id: "mem", t: "Host memory", stack: 1, unit: "MB", d: 0, max: n => n.mem_total_mb, head: p => p.mem_used_mb,
+    s: [{f: "mem_used_mb", c: "var(--c1)", name: "used"}, {f: "mem_cache_mb", c: "var(--c6)", name: "cache"}], extra: p => `swap ${fmt(p.swap_used_mb, 0)} MB`},
+];
+function cardHtml(m) { return `<div class="card" id="c-${m.id}"><div class="top"><span class="k">${m.t}</span><span class="v">–</span></div>
+  <div class="legend"></div><svg class="ch" viewBox="0 0 300 50" preserveAspectRatio="none"></svg><span class="ymax"></span>
+  <div class="xax"><span class="x0"></span><span>now</span></div></div>`; }
+function drawCard(m, pts, node) {
+  const el = document.getElementById("c-" + m.id);
+  if (!el) return;
+  const last = pts[pts.length - 1] || {};
+  const val = s => typeof s.f === "function" ? s.f(last) : last[s.f];
+  const head = m.head ? m.head(last) : m.stack ? m.s.reduce((a, s) => a + (+val(s) || 0), 0) : val(m.s[0]);
+  el.querySelector(".v").innerHTML = big(head, m.d, m.unit);
+  el.querySelector(".legend").innerHTML = m.s.map(s => `<i style="background:${s.c}"></i>${s.name} <b>${fmt(val(s), m.d)}</b>`).join("") + (m.extra ? ` · ${m.extra(last)}` : "");
+  const {svg, ymax} = chart(pts, m.s, {stack: m.stack, span: m.span, max: typeof m.max === "function" ? m.max(node || {}) : m.max});
+  el.querySelector("svg").innerHTML = svg;
+  el.querySelector(".ymax").textContent = ymax === null ? "" : "max " + fmt(ymax, ymax < 10 ? 1 : 0);
+  el.querySelector(".x0").textContent = "−" + (m.span ? "15 min" : SPAN_TXT[RANGE]);
+}
+document.getElementById("g-capture").innerHTML = CAPTURE.map(cardHtml).join("");
+document.getElementById("g-sql").innerHTML = SQL.map(cardHtml).join("");
+document.getElementById("g-proc").innerHTML = PROC.map(cardHtml).join("");
+
+function tile(k, bigHtml, sub, st) { return `<div class="tile ${st || ""}"><div class="k">${k}</div><div class="big">${bigHtml}</div><div class="sub">${sub || ""}</div></div>`; }
+function renderSummary() {
+  const I = D.info || {}, srv = (I.servers || [])[0] || {}, stream = (I.status || {}).stream || {}, mon = srv.monitor || {}, bl = srv.baseline || {};
+  const jobs = ((I.jobs || {})[srv.id] || []), lastCopy = jobs.find(j => j.outcome === "ok" && j.kind !== "compact");
+  const lastFull = jobs.find(j => j.outcome === "ok" && j.kind === "dump");
+  const started = I.container_started || (D.perf && (D.perf.series || []).slice(-1)[0] || {}).db_started;
+  const fr = stream.freshness || {}, cont = (stream.continuity || {}).status, cap = (stream.capture_health || {}).status;
+  const lag = D.lag, st = D.stats || {};
+  const failPct = st.runs ? 100 * (st.errors + st.timeouts) / st.runs : 0;
+  document.getElementById("summary").innerHTML = [
+    tile("Version", esc(I.version || "?"), esc(I.image || ""), I.version ? "st-good" : "st-warn"),
+    tile("Running since", started ? dur(D.now - started) : "–", started ? when(started) : "", started ? "st-good" : "st-warn"),
+    tile("Capture", esc(mon.state || srv.monitor_state || "?"), `${esc(srv.name || "")} → ${fmt(stream.events_indexed, 0)} changes indexed · newest ${dur(fr.newest_event_age_seconds)} old · continuity ${esc(cont || "?")} · capture ${esc(cap || "?")}`,
+      mon.state === "running" && cont === "ok" ? "st-good" : "st-bad"),
+    tile("Copy for SQL", lastCopy ? ago(lastCopy.finished) : "–", lastCopy ? `${esc(lastCopy.kind === "dump" ? "full read" : lastCopy.kind)} took ${dur(lastCopy.seconds)} · last full read ${lastFull ? ago(lastFull.finished) + " (" + dur(lastFull.seconds) + ")" : "not in the history"}` : "no finished copy in the history",
+      lastCopy && D.now - lastCopy.finished < 900 ? "st-good" : "st-warn"),
+    tile("End-to-end lag", lag === null || lag === undefined ? "–" : big(lag, 1, "s"), "heartbeat row written on the primary, read through DBTrail's SQL port",
+      lag === null || lag === undefined ? "st-warn" : lag < 120 ? "st-good" : lag < 600 ? "st-warn" : "st-bad"),
+    tile("Benchmark on DBTrail", st.runs ? big(failPct, 1, "% failed") : "–", `since the dashboard started: ${fmt(st.runs)} runs · ${fmt(st.errors)} errors · ${fmt(st.timeouts)} timeouts · geomean ${st.geomean ? fmt(st.geomean, 2) + " s" : "–"}`,
+      failPct < 2 ? "st-good" : failPct < 10 ? "st-warn" : "st-bad"),
+  ].join("");
+}
+function row(k, v, sub) { return `<tr><td>${k}</td><td><b>${v}</b>${sub ? ` <span>${sub}</span>` : ""}</td></tr>`; }
+function grp(t) { return `<tr class="grp"><td colspan="2">${t}</td></tr>`; }
+function renderSettings() {
+  const I = D.info || {}, srv = (I.servers || [])[0] || {}, sq = I.sql || {}, ro = I.rotation || {}, ca = I.capacity || {}, sc = srv.schedule || {}, stream = (I.status || {}).stream || {};
+  let h = grp("Source");
+  h += row("Server", esc(srv.name || "–"), esc(`${srv.source || ""} · ${srv.flavor || ""} · schemas ${srv.schemas || "all"}`));
+  h += row("Position", esc(stream.mode === "gtid" ? "GTID" : (stream.mode || "–")), esc(`${stream.binlog_file || ""}:${stream.binlog_position || ""}`));
+  h += grp("Copy for SQL");
+  h += row("Update", sc.every ? "every " + esc(sc.every) : "no schedule", sc.every && sc.at && sc.at !== "00:00" ? "aligned to " + esc(sc.at) + " UTC" : "");
+  h += row("Full read", sc.full_every ? "every " + esc(sc.full_every) : "only when an update cannot serve", "");
+  h += row("Copies kept", fmt(sc.keep_newest), "newest local snapshots");
+  h += grp("SQL on the copy");
+  h += row("Memory per statement", esc(sq.memory || "–"), esc(`${sq.source ? "set at " + sq.source : ""}${sq.default ? " · default " + sq.default : ""}`));
+  h += row("Unmerged changes", sq.max_unmerged_mb ? fmt(sq.max_unmerged_mb) + " MB" : "–", "per table before answering from an earlier copy");
+  h += row("Statements at once", fmt(sq.max_in_flight), sq.disk ? "spill up to " + esc(sq.disk) : "");
+  if (sq.warning) h += `<tr><td></td><td><span style="color:var(--warning)">${esc(sq.warning)}</span></td></tr>`;
+  h += grp("Index");
+  h += row("Change history kept", esc(ro.retain || "–"), esc(`partitions every ${ro.interval || "?"} · ${(I.status || {}).partitions || "?"} partitions now`));
+  h += row("Index size", bytes(ca.current_bytes), ca.growth_bytes_per_day ? `grows ${bytes(ca.growth_bytes_per_day)}/day · ${fmt(ca.events_per_day / 1e6, 1)} M changes/day` : "");
+  h += row("Disk", ca.free_bytes ? bytes(ca.free_bytes) + " free" : "–", ca.days_until_full ? `full in ${fmt(ca.days_until_full, 1)} days at this rate (capacity check: ${esc(ca.status || "?")})` : "");
+  document.getElementById("settings").innerHTML = h;
+}
+function renderJobs() {
+  const I = D.info || {}, srv = (I.servers || [])[0] || {}, jobs = ((I.jobs || {})[srv.id] || []);
+  const el = document.getElementById("jobs");
+  if (!jobs.length) { el.innerHTML = `<div class="empty">${esc((I.errors || {}).jobs || "No copy jobs in DBTrail's history.")}</div>`; document.getElementById("jobbars").innerHTML = ""; return; }
+  // bars: one per finished job over the history it covers, height = duration
+  const fin = jobs.filter(j => j.started && j.finished), t0 = Math.min(...fin.map(j => j.started)), span = Math.max(600, D.now - t0);
+  const ymax = niceMax(Math.max(...fin.map(j => j.seconds || 0)) * 1.1), W = 600, H = 60;
+  document.getElementById("jobbars").innerHTML = `<line class="gl" x1="0" x2="${W}" y1="${H - 0.5}" y2="${H - 0.5}"/>` + fin.map(j => {
+    const x = (j.started - t0) / span * W, w = Math.max(2, (j.finished - j.started) / span * W), h = Math.max(1.5, (j.seconds || 0) / ymax * (H - 4));
+    const c = j.outcome !== "ok" ? "var(--critical)" : j.kind === "dump" ? "var(--c5)" : j.kind === "refresh" ? "var(--c1)" : "var(--c6)";
+    return `<rect x="${x.toFixed(1)}" y="${(H - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" style="fill:${c}"><title>${esc(j.kind)} ${when(j.started)} · ${dur(j.seconds)} · ${esc(j.outcome)}</title></rect>`;
+  }).join("");
+  document.getElementById("jobx0").textContent = "−" + dur(span) + " · bar height = duration, tallest " + dur(ymax);
+  document.getElementById("jobsnote").textContent = `· ${jobs.length} latest from DBTrail's history`;
+  el.innerHTML = `<table class="u"><tr><th>Job</th><th>Started</th><th class="n">Took</th><th>Outcome</th><th class="n">Changes / rows</th><th>Detail</th></tr>` +
+    jobs.slice(0, 12).map(j => `<tr><td><span class="pill ${esc(j.kind)}">${esc(j.kind === "dump" ? "full read" : j.kind)}</span></td><td>${when(j.started)}</td>
+      <td class="n">${dur(j.seconds)}</td><td><span class="pill ${esc(j.outcome)}">${esc(j.outcome)}</span></td>
+      <td class="n">${j.events !== null && j.events !== undefined ? fmt(j.events) + " changes" : j.rows ? fmt(j.rows) + " rows" : "–"}</td>
+      <td class="wrap">${esc(j.detail || j.why || "")}</td></tr>`).join("") + `</table>`;
+}
+function renderFails() {
+  const F = D.failures || [], el = document.getElementById("fails");
+  if (!F.length) { el.innerHTML = `<div class="empty">No failed executions on ${esc(D.label)} kept so far.</div>`; return; }
+  el.innerHTML = `<table class="u"><tr><th>When</th><th class="n">Round</th><th>Query</th><th>Outcome</th><th class="n">After</th><th>Error</th></tr>` +
+    F.map((f, i) => `<tr class="click" tabindex="0" data-i="${i}"><td>${when(f.t)} <span style="color:var(--muted)">(${ago(f.t)})</span></td><td class="n">${fmt(f.round)}</td>
+      <td><b>${esc(f.q)}</b> ${esc(f.name || "")}</td><td><span class="pill ${esc(f.status)}">${esc(f.status)}</span></td><td class="n">${dur(f.elapsed)}</td>
+      <td class="wrap">${esc((f.error || "").slice(0, 160))}${(f.error || "").length > 160 ? "…" : ""}</td></tr>`).join("") + `</table>`;
+}
+function openFail(i) {
+  const f = (D.failures || [])[i];
+  if (!f) return;
+  const box = document.getElementById("fbox");
+  box.innerHTML = `<button class="x" aria-label="Close" id="fclose">×</button>
+    <h3 id="ftitle">${esc(f.q)} ${esc(f.name || "")} · <span class="pill ${esc(f.status)}">${esc(f.status)}</span></h3>
+    <div class="meta">${esc(D.label)} · ${when(f.t)} · round ${fmt(f.round)} · after ${dur(f.elapsed)}${f.status === "timeout" ? ` (timeout ${D.timeout} s)` : ""}</div>
+    <h4>Error returned by ${esc(D.label)} <button class="copy" data-c="err">Copy</button></h4><pre class="err" id="f-err">${esc(f.error || "(no message)")}</pre>
+    <h4>Parameters</h4><div class="meta">${esc(f.params || "–")}</div>
+    <h4>SQL that ran <button class="copy" data-c="sql">Copy</button></h4><pre id="f-sql">${esc(f.sql || "")}</pre>`;
+  document.getElementById("fmodal").hidden = false;
+  document.getElementById("fclose").focus();
+}
+function closeFail() { document.getElementById("fmodal").hidden = true; }
+document.getElementById("fails").addEventListener("click", ev => { const r = ev.target.closest("tr[data-i]"); if (r) openFail(+r.dataset.i); });
+document.getElementById("fails").addEventListener("keydown", ev => { const r = ev.target.closest("tr[data-i]"); if (r && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); openFail(+r.dataset.i); } });
+document.getElementById("fmodal").addEventListener("click", ev => {
+  if (ev.target.id === "fmodal" || ev.target.id === "fclose") return closeFail();
+  const b = ev.target.closest(".copy");
+  if (!b) return;
+  const pre = document.getElementById(b.dataset.c === "sql" ? "f-sql" : "f-err");
+  navigator.clipboard.writeText(pre.textContent).then(() => { b.textContent = "Copied"; }, () => { const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+});
+document.addEventListener("keydown", ev => { if (ev.key === "Escape") closeFail(); });
+
+function renderUnits() {
+  const n = D.perf || {}, u = Object.entries(n.units || {}).filter(([name]) => /docker|bintrail|index-mysql|dbtrail/i.test(name)).sort((a, b) => b[1].mem_mb - a[1].mem_mb);
+  const el = document.getElementById("units");
+  if (!u.length) { el.innerHTML = `<div class="empty">No container data from the DBTrail host.</div>`; return; }
+  el.innerHTML = `<table class="u"><tr><th>Container · main process</th><th class="n">CPU now</th><th class="n">avg</th><th class="n">max</th><th>CPU, last ${SPAN_TXT[RANGE]}</th>
+      <th class="n">Memory now</th><th class="n">min – max</th><th class="n">change</th><th>Memory, last ${SPAN_TXT[RANGE]}</th></tr>` +
+    u.map(([name, x]) => {
+      const pts = x.points.map(p => ({t: p[0], cpu: p[1], mem: p[2]}));
+      const cpu = chart(pts, [{f: "cpu", c: "var(--c1)"}], {max: Math.max(100, niceMax(x.cpu_max))});
+      const lo = Math.max(0, x.mem_min - (x.mem_max - x.mem_min) * 0.5 - 1);
+      const mem = chart(pts.map(p => ({...p, m: p.mem - lo})), [{f: "m", c: "var(--c5)"}], {max: niceMax((x.mem_max - lo) * 1.05)});
+      const ch = x.mem_change, cls = ch > 0 ? "up" : ch < 0 ? "down" : "";
+      return `<tr><td class="nm"><b>${esc(name)}</b>${x.main ? ` <span>· ${esc(x.main)}</span>` : ""}</td>
+        <td class="n">${fmt(x.cpu, 0)}%</td><td class="n">${fmt(x.cpu_avg, 0)}%</td><td class="n">${fmt(x.cpu_max, 0)}%</td>
+        <td class="sp"><svg viewBox="0 0 300 50" preserveAspectRatio="none">${cpu.svg}</svg></td>
+        <td class="n"><b>${bytesMB(x.mem_mb)}</b></td><td class="n">${bytesMB(x.mem_min)} – ${bytesMB(x.mem_max)}</td>
+        <td class="n ${cls}">${ch > 0 ? "+" : ch < 0 ? "−" : "±"}${bytesMB(Math.abs(ch))}</td>
+        <td class="sp"><svg viewBox="0 0 300 50" preserveAspectRatio="none">${mem.svg}</svg></td></tr>`;
+    }).join("") + `</table><div class="note">CPU in % of one CPU (${n.cpus} CPUs). Memory charts are zoomed to their own range.</div>`;
+}
+function render() {
+  document.getElementById("title").textContent = !D.label || /^dbtrail$/i.test(D.label) ? "DBTrail" : "DBTrail · " + D.label;
+  document.title = "DBTrail · " + (D.title || "tplytics compare");
+  const errs = Object.entries(Object.assign({}, D.errors || {}, (D.info || {}).errors || {})).map(([k, v]) => `${k}: ${v}`);
+  if (D.error) errs.unshift(D.error);
+  document.getElementById("errs").textContent = errs.join(" · ");
+  const P = D.perf || {}, step = P.step || 5;
+  document.getElementById("meta").textContent = `${D.describe || ""} · charts: last ${SPAN_TXT[RANGE]}, one point every ${step >= 60 ? step / 60 + " min" : step + " s"}` +
+    ` · updated ${new Date(D.now * 1000).toLocaleTimeString([], {hour12: false})}` +
+    (P.history_seconds !== undefined && P.history_seconds < SPAN[RANGE] ? ` · collected for ${P.history_seconds >= 3600 ? (P.history_seconds / 3600).toFixed(1) + " h" : Math.round(P.history_seconds / 60) + " min"} so far` : "");
+  document.querySelectorAll("#ranges button").forEach(b => b.classList.toggle("on", b.dataset.r === RANGE));
+  renderSummary(); renderSettings(); renderJobs(); renderFails();
+  const pts = P.series || [], lagPts = (D.lag_series || []).map(p => ({t: p.t, lag: p.lag}));
+  CAPTURE.forEach(m => drawCard(m, m.lag ? lagPts : pts, P));
+  SQL.forEach(m => drawCard(m, pts, P));
+  PROC.forEach(m => drawCard(m, pts, P));
+  renderUnits();
+}
+let pollTimer = null;
+async function poll() {
+  clearTimeout(pollTimer);
+  const want = RANGE;
+  try { const r = await fetch("api/dbtrail?range=" + want); const d = await r.json(); if (want === RANGE) { D = d; render(); } }
+  catch (e) { document.getElementById("meta").textContent = "disconnected"; }
+  pollTimer = setTimeout(poll, SPAN[RANGE] > 3600 ? 30000 : 10000);
+}
+document.getElementById("ranges").addEventListener("click", ev => {
+  const b = ev.target.closest("button[data-r]");
+  if (!b || b.dataset.r === RANGE) return;
+  RANGE = b.dataset.r;
+  try { localStorage.setItem("tplytics-perf-range", RANGE); } catch (e) {}
+  poll();
+});
+poll();
+</script>
+</body>
+</html>

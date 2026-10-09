@@ -53,11 +53,12 @@ from .dashboard import Sampler
 from .engines import get_engine
 from .heartbeat import DEFAULT_TABLE, lag_of, read_heartbeat
 from .modes import fmt_value
-from .runner import OK, TIMEOUT, Runner
+from .runner import CANCELLED, OK, TIMEOUT, UNSUPPORTED, Runner
 from .state import TIME_SOURCES, DatabaseState, describe_range, human_duration, refresh_state
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare.html")
 PERF_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "perf.html")
+DBTRAIL_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dbtrail.html")
 LAG_STEP = 5.0               # seconds between points of the lag history
 LAG_POINTS = 180             # 15 minutes
 CONN_KEYS = ("engine", "host", "port", "socket", "user", "password", "database", "schema",
@@ -491,6 +492,57 @@ class StatusPoller(threading.Thread):
             time.sleep(max(0.1, (self.interval if self.t.opts.status_url else 2.0) - (time.time() - t)))
 
 
+class FailLog:
+    """The latest failed executions (errors and timeouts) with their SQL and error text.
+
+    Kept in memory and appended to a JSON-lines file when a path is given, so
+    the list on the /dbtrail page survives restarts. The file is cut back to
+    the newest `keep` entries when it has grown to twice that.
+    """
+
+    def __init__(self, path, keep=200):
+        self.path, self.keep = path, keep
+        self.items = collections.deque(maxlen=keep)
+        self.lines = 0
+        self.lock = threading.Lock()
+        if path:
+            try:
+                with open(path) as fh:
+                    for line in fh:
+                        try:
+                            self.items.append(json.loads(line))
+                        except ValueError:
+                            continue
+            except FileNotFoundError:
+                pass
+            self._rewrite()
+
+    def _rewrite(self):
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        tmp = self.path + ".tmp"
+        with open(tmp, "w") as fh:
+            for p in self.items:
+                fh.write(json.dumps(p, separators=(",", ":"), default=str) + "\n")
+        os.replace(tmp, self.path)
+        self.lines = len(self.items)
+
+    def add(self, rec):
+        with self.lock:
+            self.items.append(rec)
+            if not self.path:
+                return
+            if self.lines >= 2 * self.keep:
+                self._rewrite()
+            else:
+                with open(self.path, "a") as fh:
+                    fh.write(json.dumps(rec, separators=(",", ":"), default=str) + "\n")
+                self.lines += 1
+
+    def latest(self, label=None, n=10):
+        with self.lock:
+            return [p for p in reversed(self.items) if label is None or p.get("target") == label][:n]
+
+
 # ================================================================ round loop
 class CompareLoop(threading.Thread):
     """One query per round, the same statement on every target at the same time."""
@@ -523,6 +575,7 @@ class CompareLoop(threading.Thread):
             root, ext = os.path.splitext(args.history_file)
             exec_path = root + "-executions" + (ext or ".jsonl")
         self.execlog = ExecLog(exec_path, args.keep_hours)
+        self.faillog = FailLog(root + "-failures" + (ext or ".jsonl") if args.history_file else None)
 
     def _pick(self):
         if self.args.order == "weighted":
@@ -549,8 +602,16 @@ class CompareLoop(threading.Thread):
         with self.lock:
             self.state_refreshed = time.time()
 
-    def _run_one(self, t, q, sql, values, res):
+    def _run_one(self, t, q, sql, values, res, seq=None):
         r = self.runners[t.label].run(q.id, sql, keep_rows=self.args.show_rows, params=values)
+        if r.status not in (OK, UNSUPPORTED, CANCELLED):
+            try:
+                self.faillog.add({"t": round(time.time(), 1), "round": seq, "q": q.id, "name": q.name,
+                                  "target": t.label, "engine": t.engine.name, "status": r.status,
+                                  "elapsed": None if r.elapsed is None else round(r.elapsed, 3),
+                                  "error": r.error, "params": P.describe(values), "sql": sql})
+            except OSError as e:
+                print("cannot write %s: %s" % (self.faillog.path, e), flush=True)
         with self.lock:
             res.update({"state": "done", "status": r.status, "elapsed": r.elapsed, "rows": r.rows,
                         "error": r.error, "finished": time.time(), "columns": r.columns or [],
@@ -597,7 +658,8 @@ class CompareLoop(threading.Thread):
                                error="target unavailable (retried every %ds): %s" % (Target.RETRY, t.error))
                 else:
                     res["sql"] = q.render(t.engine, values)
-                    th = threading.Thread(target=self._run_one, args=(t, q, res["sql"], values, res), daemon=True)
+                    th = threading.Thread(target=self._run_one, args=(t, q, res["sql"], values, res, self.rounds + 1),
+                                          daemon=True)
                     threads.append(th)
                 results[t.label] = res
             entry = {"seq": self.rounds + 1, "id": q.id, "name": q.name, "complexity": q.complexity,
@@ -708,6 +770,38 @@ def perf_doc(targets, local_perf, primary, args, rng="1h"):
     return {"title": args.title, "now": time.time(), "range": rng, "nodes": nodes}
 
 
+def _fetch_json(url, timeout=8):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.load(r)
+
+
+def dbtrail_doc(loop, targets, args, rng="1h", label=None):
+    """The /dbtrail page: the DBTrail target's own report (version, settings, copy jobs) and
+    performance from its monitor, plus the failed executions this dashboard saw on it."""
+    t = next((x for x in targets if (x.label == label if label else x.engine.name == "dbtrail")), None)
+    if t is None:
+        return {"title": args.title, "now": time.time(), "error": "no DBTrail target in the configuration"}
+    doc = {"title": args.title, "now": time.time(), "range": rng, "label": t.label, "errors": {},
+           "describe": t.describe(), "server_version": t.server_version, "target_error": t.error}
+    base = (t.opts.status_url or "").rstrip("/")
+    for key, path in (("info", "/api/dbtrail"), ("perf", "/api/perf?range=" + rng), ("heartbeat", "/api/heartbeat")):
+        if not base:
+            doc["errors"][key] = "no status_url for this target"
+            continue
+        try:
+            doc[key] = _fetch_json(base + path)
+        except Exception as e:  # noqa: BLE001
+            doc["errors"][key] = "%s%s: %s" % (base, path, str(e)[:160])
+    with t.lock:
+        doc["lag_series"] = list(t.lag_series)
+        doc["lag"] = t.status.get("lag")
+    with loop.lock:
+        doc["stats"] = loop.overall[t.label].as_dict()
+    doc["failures"] = loop.faillog.latest(t.label, 10)
+    doc["timeout"] = args.timeout
+    return doc
+
+
 def make_handler(loop, targets, local, primary, args, local_perf=None):
     def state():
         d = loop.snapshot()
@@ -759,6 +853,16 @@ def make_handler(loop, targets, local, primary, args, local_perf=None):
             elif self.path in ("/performance", "/performance/"):
                 with open(PERF_PAGE, "rb") as fh:
                     self._send(200, fh.read(), "text/html; charset=utf-8")
+            elif self.path in ("/dbtrail", "/dbtrail/"):
+                with open(DBTRAIL_PAGE, "rb") as fh:
+                    self._send(200, fh.read(), "text/html; charset=utf-8")
+            elif self.path.split("?")[0] == "/api/dbtrail":
+                from urllib.parse import parse_qs, urlsplit
+                qs = parse_qs(urlsplit(self.path).query)
+                rng = (qs.get("range") or ["1h"])[0]
+                rng = rng if rng in ("15m", "1h", "6h", "24h") else "1h"
+                doc = dbtrail_doc(loop, targets, args, rng, (qs.get("target") or [None])[0])
+                self._send(200, json.dumps(doc, default=str), "application/json")
             elif self.path.split("?")[0] == "/api/perf":
                 from urllib.parse import parse_qs, urlsplit
                 rng = (parse_qs(urlsplit(self.path).query).get("range") or ["1h"])[0]

@@ -192,6 +192,14 @@ def build_parser():
     g.add_argument("--prometheus-url", default=None, metavar="URL",
                    help="monitor --perf: read database metrics from this Prometheus endpoint (e.g. DBTrail's "
                         "http://127.0.0.1:9090/metrics) instead of the monitored database")
+    g.add_argument("--dbtrail-console", default=None, metavar="URL",
+                   help="monitor: also serve DBTrail's version, settings and copy jobs on /api/dbtrail, read from "
+                        "its web interface at this URL (e.g. http://127.0.0.1:8090), for the compare /dbtrail page")
+    g.add_argument("--dbtrail-token-file", default=None, metavar="FILE",
+                   help="monitor --dbtrail-console: file with the API token (plain, or DBTrail's .env with CONSOLE_TOKEN=)")
+    g.add_argument("--dbtrail-history", default=None, metavar="FILE",
+                   help="monitor --dbtrail-console: DBTrail's copy run history (console-baseline-history.json "
+                        "in its state volume), for the list of recent full reads and refreshes")
     g.add_argument("--skew", type=float, default=None,
                    help="monitor: read this many seconds after each write tick (default: half the interval)")
     g.add_argument("--max-lag", type=float, default=None,

@@ -241,6 +241,37 @@ heartbeat table through the target itself and host load is not shown. Keys under
 `timeout`, `title`, ...). `scripts/systemd/tplytics-compare.service` runs it as
 a service with `/etc/tplytics/compare.toml`.
 
+
+**/dbtrail** is a page about the DBTrail target itself:
+
+* **version**, container image and **running since**;
+* capture state (changes indexed, freshness, continuity), when the copy for
+  SQL was last updated and the last full read, end-to-end lag, and this
+  dashboard's failure rate on DBTrail;
+* the **settings** that shape it: copy schedule and full reads, SQL memory per
+  statement and unmerged-changes limit, statements at once, change history
+  kept, index size, growth and free disk;
+* the latest **copy jobs** (full reads, refreshes, compactions) with duration
+  and outcome, as a timeline and a table;
+* the **latest 10 failed benchmark executions** on DBTrail (errors and
+  timeouts); click one to see the SQL that ran, its parameters and the error
+  DBTrail returned. They are kept in `<history_file>-failures.jsonl`, so they
+  survive restarts;
+* charts (15 min to 24 h) of changes indexed, capture lag, index size and
+  commit latency, SQL statements/s and time per statement by phase, the
+  DBTrail process's CPU and memory, and the DBTrail containers.
+
+The DBTrail web interface and metrics listen on localhost only, so the
+heartbeat monitor on the DBTrail host reads them and serves `/api/dbtrail`:
+
+```
+tplytics heartbeat monitor ... --perf --prometheus-url http://127.0.0.1:9090/metrics \
+    --dbtrail-console http://127.0.0.1:8090 --dbtrail-token-file /opt/dbtrail/.env \
+    --dbtrail-history /var/lib/docker/volumes/dbtrail_bintrail-state/_data/console-baseline-history.json
+```
+
+The token file is DBTrail's `.env` (its `CONSOLE_TOKEN=` line) or a file with
+the token alone; the history file is DBTrail's own record of copy runs.
 ### Other commands
 
 | command | what it does |
