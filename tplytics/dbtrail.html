@@ -285,11 +285,25 @@ function renderSettings() {
   h += row("Memory per statement", esc(sq.memory || "–"), esc(`${sq.source ? "set at " + sq.source : ""}${sq.default ? " · default " + sq.default : ""}`));
   h += row("Unmerged changes", sq.max_unmerged_mb ? fmt(sq.max_unmerged_mb) + " MB" : "–", "per table before answering from an earlier copy");
   h += row("Statements at once", fmt(sq.max_in_flight), sq.disk ? "spill up to " + esc(sq.disk) : "");
+  if (sq.no_own_ceiling !== undefined) h += row("Memory limit per statement", sq.no_own_ceiling ? "not enforced" : "enforced",
+    sq.no_own_ceiling ? esc(sq.no_own_ceiling) : "each statement runs under its own memory limit");
   if (sq.warning) h += `<tr><td></td><td><span style="color:var(--warning)">${esc(sq.warning)}</span></td></tr>`;
   h += grp("Index");
   h += row("Change history kept", esc(ro.retain || "–"), esc(`partitions every ${ro.interval || "?"} · ${(I.status || {}).partitions || "?"} partitions now`));
-  h += row("Index size", bytes(ca.current_bytes), ca.growth_bytes_per_day ? `grows ${bytes(ca.growth_bytes_per_day)}/day · ${fmt(ca.events_per_day / 1e6, 1)} M changes/day` : "");
-  h += row("Disk", ca.free_bytes ? bytes(ca.free_bytes) + " free" : "–", ca.days_until_full ? `full in ${fmt(ca.days_until_full, 1)} days at this rate (capacity check: ${esc(ca.status || "?")})` : "");
+  const cov = (I.status || {}).coverage || {};
+  if (cov.earliest_event) h += row("Changes in the index", `${when(cov.earliest_event)} → ${when(cov.latest_event)}`,
+    `${dur(cov.latest_event - cov.earliest_event)} · ${fmt(cov.total_events / 1e6, 1)} M changes · ${fmt(cov.schema_changes)} schema changes`);
+  h += row("Index size", bytes(ca.current_bytes), ca.growth_bytes_per_day ? `writes ${bytes(ca.growth_bytes_per_day)}/day · ${fmt(ca.events_per_day / 1e6, 1)} M changes/day` : "");
+  h += row("Disk", ca.free_bytes ? bytes(ca.free_bytes) + " free" : "–",
+    ca.days_until_full ? `full in ${fmt(ca.days_until_full, 1)} days at this rate` :
+    ca.free_space_days_at_write_rate ? `the write rate alone would fill it in ${fmt(ca.free_space_days_at_write_rate, 1)} days; retention keeps it from growing` : "");
+  if (ca.status) {
+    const assumed = (ca.retention || {}).retain, kept = ro.retain;
+    const mismatch = assumed && kept && assumed !== kept;
+    h += `<tr><td>Capacity check</td><td><span class="pill ${ca.status === "pass" ? "ok" : "failed"}">${esc(ca.status)}</span> <span>${esc((ca.reason || "").replace(/_/g, " "))}` +
+      (ca.projected_bytes ? ` · projects ${bytes(ca.projected_bytes)} at ${esc(assumed || "?")} of history` : "") + `</span>` +
+      (mismatch ? `<br><span style="color:var(--warning)">The check assumes ${esc(assumed)} of change history (${esc((ca.retention || {}).source || "")}), while the index keeps ${esc(kept)}${cov.earliest_event ? ` (it holds ${dur(cov.latest_event - cov.earliest_event)} now)` : ""}.</span>` : "") + `</td></tr>`;
+  }
   document.getElementById("settings").innerHTML = h;
 }
 const isSkip = j => j.outcome === "skipped";
@@ -307,6 +321,12 @@ function rewritesHtml(j) {
     const tables = rs.slice(0, 4).map(r => `<b>${esc(r.table)}</b> ${rows(r.rows)}`).join(", ") + (rs.length > 4 ? ` and ${rs.length - 4} more` : "");
     return `<span class="rw">rewrote ${rs.length > 1 ? rs.length + " tables" : "table"} in full: ${tables} rows · ${esc(reason)}</span>`;
   }).join("");
+}
+function resolvedHtml(j) {
+  const r = j.resolved;
+  if (!r) return "";
+  return `<span class="rw">then merged the changes of <b>${fmt(r.merged)}</b> table${r.merged === 1 ? "" : "s"} into one file for queries in <b>${dur(r.seconds)}</b>` +
+    `${r.failed ? ` · <span style="color:var(--critical)">${fmt(r.failed)} not merged (queries read their changes as before)</span>` : ""}</span>`;
 }
 function rows(n) { return n >= 1e6 ? fmt(n / 1e6, n >= 1e7 ? 0 : 1) + " M" : n >= 1e3 ? fmt(n / 1e3, 0) + " K" : fmt(n); }
 function renderJobs() {
@@ -338,7 +358,7 @@ function renderJobs() {
       return `<tr><td><span class="pill ${esc(j.kind)} ${rewrote(j) && j.kind === "refresh" ? "rewrite" : ""}">${esc(jobKind(j))}${rewrote(j) && j.kind === "refresh" ? " + rewrite" : ""}</span></td><td>${when(j.started)}</td>
         <td class="n">${dur(j.seconds)}</td><td><span class="pill ${esc(j.outcome)}">${esc(j.outcome)}</span></td>
         <td class="n">${j.events !== null && j.events !== undefined ? fmt(j.events) + " changes" : j.rows ? fmt(j.rows) + " rows" : "–"}</td>
-        <td class="wrap">${rewritesHtml(j)}${esc(j.detail || j.why || "")}</td></tr>`;
+        <td class="wrap">${rewritesHtml(j)}${resolvedHtml(j)}${esc(j.detail || j.why || "")}</td></tr>`;
     }).join("") + `</table>`;
 }
 function renderFails() {

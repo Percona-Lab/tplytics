@@ -29,6 +29,8 @@ import urllib.request
 CACHE_SECONDS = 15
 JOBS_KEPT = 60
 LOG_FIRST_READ = 32 << 20        # at start, read at most the last 32 MB of the container log
+RESOLVED_RE = re.compile(r'time=(\S+) .*msg="resolved pairs: done for the newest snapshot" .*snapshot=(\S+) '
+                         r'tables_merged=(\d+) tables_unchanged=(\d+) tables_failed=(\d+) took_ms=(\d+)')
 REWRITE_RE = re.compile(r'time=(\S+) .*msg="table rewritten in full[^"]*" schema=(\S+) table=(\S+) reason="([^"]*)"'
                         r'.*?rows_written=(\d+)')
 
@@ -95,6 +97,7 @@ class RewriteLog:
 
     def __init__(self, keep=400):
         self.events = collections.deque(maxlen=keep)
+        self.resolved = {}          # snapshot epoch -> the merge DBTrail ran after it (0.103+)
         self.path, self.inode, self.pos = None, None, 0
         self.error = None
 
@@ -102,6 +105,16 @@ class RewriteLog:
         try:
             text = json.loads(line).get("log", "")
         except ValueError:
+            return
+        if "resolved pairs: done" in text:
+            m = RESOLVED_RE.search(text)
+            if m:
+                snap = _ts(re.sub(r"T(\d\d)-(\d\d)-(\d\d)", r"T\1:\2:\3", m.group(2)))
+                self.resolved[snap] = {"t": _ts(m.group(1)), "merged": int(m.group(3)), "unchanged": int(m.group(4)),
+                                       "failed": int(m.group(5)), "seconds": int(m.group(6)) / 1000.0}
+                if len(self.resolved) > 400:
+                    for k in sorted(self.resolved)[:100]:
+                        del self.resolved[k]
             return
         if "rewritten in full" not in text:
             return
@@ -121,6 +134,7 @@ class RewriteLog:
             if path != self.path or st.st_ino != self.inode or st.st_size < self.pos:
                 # new container or rotated file: start again from (the end of) the new file
                 self.path, self.inode, self.events = path, st.st_ino, collections.deque(maxlen=self.events.maxlen)
+                self.resolved = {}
                 self.pos = max(0, st.st_size - LOG_FIRST_READ)
             with open(path, "rb") as fh:
                 fh.seek(self.pos)
@@ -175,7 +189,7 @@ class DBTrailInfo:
                              "seconds": round(end - start, 1) if start and end else None,
                              "outcome": "skipped" if skip else ("failed" if err else "ok"),
                              "detail": (err or skip or "")[:500],
-                             "trigger": e.get("trigger"), "why": e.get("why"),
+                             "trigger": e.get("trigger"), "why": e.get("why"), "snapshot": _ts(e.get("snapshot_time")),
                              "tables": e.get("tables"), "rows": e.get("rows"), "events": e.get("events")})
             out[sid] = list(reversed(jobs))
         self.rewrites.update()
@@ -183,6 +197,8 @@ class DBTrailInfo:
             for j in jobs:
                 if j["outcome"] != "skipped" and j["started"] and j["finished"]:
                     j["rewrites"] = self.rewrites.within(j["started"], j["finished"])
+                    if j.get("snapshot") in self.rewrites.resolved:
+                        j["resolved"] = self.rewrites.resolved[j["snapshot"]]
         return out
 
     def snapshot(self):
@@ -240,7 +256,10 @@ class DBTrailInfo:
         # the status document lists every index partition: keep the summary only
         st = doc.get("status")
         if isinstance(st, dict):
-            doc["status"] = {"stream": st.get("stream"), "partitions": len(st.get("partitions") or [])}
+            cov = dict(st.get("coverage") or {})
+            for k in ("earliest_event", "latest_event"):
+                cov[k] = _ts(cov.get(k))
+            doc["status"] = {"stream": st.get("stream"), "partitions": len(st.get("partitions") or []), "coverage": cov}
         with self.lock:
             self.cached, self.cached_at = doc, time.time()
         return doc
