@@ -288,16 +288,26 @@ def run_monitor(args, engine):
             from .dashboard import Sampler
             sampler = Sampler(None, True)
             sampler.start()
+        index_mysql = None
+        if args.dbtrail_console and args.dbtrail_index_secret != "off":
+            from .dbtrail_info import IndexMySQL
+            index_mysql = IndexMySQL(args.dbtrail_index_secret)
         perf = None
         if args.perf:
             from .perf import PerfSampler
-            perf = PerfSampler(None if args.prometheus_url else engine, prometheus_url=args.prometheus_url)
+            # DBTrail's index MySQL gets its own connection here: the sampler and the settings
+            # snapshot run in different threads
+            ix = None
+            if index_mysql is not None:
+                from .dbtrail_info import IndexMySQL
+                ix = IndexMySQL(args.dbtrail_index_secret)
+            perf = PerfSampler(None if args.prometheus_url else engine, prometheus_url=args.prometheus_url, index_mysql=ix)
             perf.start()
             log("serving detailed performance on http://%s:%d/api/perf" % (args.listen, args.http_port))
         info = None
         if args.dbtrail_console:
             from .dbtrail_info import DBTrailInfo
-            info = DBTrailInfo(args.dbtrail_console, args.dbtrail_token_file, args.dbtrail_history)
+            info = DBTrailInfo(args.dbtrail_console, args.dbtrail_token_file, args.dbtrail_history, index_mysql)
             log("serving DBTrail version, settings and copy jobs on http://%s:%d/api/dbtrail" % (args.listen, args.http_port))
         serve_http(m, args.listen, args.http_port, sampler, perf, info)
         if sampler is not None:

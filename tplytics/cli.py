@@ -200,6 +200,9 @@ def build_parser():
     g.add_argument("--dbtrail-history", default=None, metavar="FILE",
                    help="monitor --dbtrail-console: DBTrail's copy run history (console-baseline-history.json "
                         "in its state volume), for the list of recent full reads and refreshes")
+    g.add_argument("--dbtrail-index-secret", default="/var/lib/docker/volumes/dbtrail_bintrail-index-secret/_data/index_password",
+                   metavar="FILE", help="monitor --dbtrail-console: root password file of DBTrail's index MySQL, which is "
+                   "read (status, settings, sizes) for /dbtrail; 'off' to leave it alone (default: the Compose secret volume)")
     g.add_argument("--skew", type=float, default=None,
                    help="monitor: read this many seconds after each write tick (default: half the interval)")
     g.add_argument("--max-lag", type=float, default=None,

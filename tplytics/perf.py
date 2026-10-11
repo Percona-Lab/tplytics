@@ -200,6 +200,7 @@ MYSQL_RATES = {
     "data_read": ("Innodb_data_read",), "data_written": ("Innodb_data_written",),
     "redo_written": ("Innodb_os_log_written",), "bp_requests": ("Innodb_buffer_pool_read_requests",),
     "bp_disk_reads": ("Innodb_buffer_pool_reads",), "lock_waits": ("Innodb_row_lock_waits",),
+    "pages_flushed": ("Innodb_buffer_pool_pages_flushed",), "fsyncs": ("Innodb_data_fsyncs",),
 }
 MYSQL_GAUGES = {"threads_running": "Threads_running", "threads_connected": "Threads_connected",
                 "bp_pages_dirty": "Innodb_buffer_pool_pages_dirty", "bp_pages_total": "Innodb_buffer_pool_pages_total",
@@ -281,9 +282,35 @@ def prometheus_sample(url):
     return {"c": c, "g": g}
 
 
+def _db_point(p, pre, da, db, rate):
+    """Rates and gauges of one database sample pair into point p, every field prefixed with pre."""
+    ca, cb = da["c"], db["c"]
+    for k in cb:
+        if k in ca:
+            p[pre + k] = round(rate(ca[k], cb[k]), 3)
+    for k, v in db["g"].items():
+        p[pre + k] = v
+    if pre + "bp_requests" in p and p[pre + "bp_requests"] > 0:
+        p[pre + "bp_hit"] = round(100.0 * (1 - p.get(pre + "bp_disk_reads", 0) / p[pre + "bp_requests"]), 3)
+    if p.get(pre + "commit_latency_count"):
+        p[pre + "commit_latency_ms"] = round(1000 * p[pre + "commit_latency_sum"] / p[pre + "commit_latency_count"], 2)
+    if pre + "proc_cpu" in p:
+        p[pre + "proc_cpu"] = round(100.0 * p[pre + "proc_cpu"], 1)          # % of one CPU
+    if pre + "rss_bytes" in p:
+        p[pre + "rss_mb"] = round(p.pop(pre + "rss_bytes") / 1048576)
+    # SQL on the copy: statements/s and the average time per statement of each phase
+    n = p.get(pre + "sqlph_total_count")
+    if n is not None:
+        p[pre + "sql_per_s"] = n
+        for ph in PROM_PHASES:
+            s, k = p.pop(pre + "sqlph_%s_sum" % ph, None), p.pop(pre + "sqlph_%s_count" % ph, None)
+            if s is not None and k:
+                p[pre + "sql_%s_s" % ph] = round(s / k, 3)
+
+
 # ================================================================== sampler
 class PerfSampler(threading.Thread):
-    def __init__(self, engine=None, prometheus_url=None, step=5.0, db_kind=None):
+    def __init__(self, engine=None, prometheus_url=None, step=5.0, db_kind=None, index_mysql=None):
         super().__init__(daemon=True, name="perf")
         self.engine, self.prom, self.step = engine, prometheus_url, step
         self.db_kind = db_kind or ("dbtrail" if prometheus_url else (engine.name if engine else None))
@@ -299,6 +326,8 @@ class PerfSampler(threading.Thread):
         self.session = None
         self.cpus = os.cpu_count() or 1
         self.db_error = None
+        # DBTrail's own index MySQL (dbtrail_info.IndexMySQL), sampled like a MySQL node into ix_* fields
+        self.index_mysql, self.ix_error = index_mysql, None
 
     def _db(self):
         if self.prom:
@@ -323,6 +352,13 @@ class PerfSampler(threading.Thread):
                 except Exception:  # noqa: BLE001
                     pass
             self.session = None
+        if self.index_mysql is not None:
+            try:
+                cur["ix"] = mysql_sample(self.index_mysql)
+                self.ix_error = None
+            except Exception as e:  # noqa: BLE001 - best effort
+                self.ix_error = str(e)[:200]
+                self.index_mysql.reset()
         return cur
 
     def run(self):
@@ -375,28 +411,9 @@ class PerfSampler(threading.Thread):
             if k in pa:
                 p["psi_" + k] = round(min(100.0, (pb[k] - pa[k]) / (dt * 1e4)), 2)   # µs per s -> %
         if a.get("db") and b.get("db"):
-            ca, cb = a["db"]["c"], b["db"]["c"]
-            for k in cb:
-                if k in ca:
-                    p["db_" + k] = round(rate(ca[k], cb[k]), 3)
-            for k, v in b["db"]["g"].items():
-                p["db_" + k] = v
-            if "db_bp_requests" in p and p["db_bp_requests"] > 0:
-                p["db_bp_hit"] = round(100.0 * (1 - p.get("db_bp_disk_reads", 0) / p["db_bp_requests"]), 3)
-            if p.get("db_commit_latency_count"):
-                p["db_commit_latency_ms"] = round(1000 * p["db_commit_latency_sum"] / p["db_commit_latency_count"], 2)
-            if "db_proc_cpu" in p:
-                p["db_proc_cpu"] = round(100.0 * p["db_proc_cpu"], 1)          # % of one CPU
-            if "db_rss_bytes" in p:
-                p["db_rss_mb"] = round(p.pop("db_rss_bytes") / 1048576)
-            # SQL on the copy: statements/s and the average time per statement of each phase
-            n = p.get("db_sqlph_total_count")
-            if n is not None:
-                p["db_sql_per_s"] = n
-                for ph in PROM_PHASES:
-                    s, k = p.pop("db_sqlph_%s_sum" % ph, None), p.pop("db_sqlph_%s_count" % ph, None)
-                    if s is not None and k:
-                        p["db_sql_%s_s" % ph] = round(s / k, 3)
+            _db_point(p, "db_", a["db"], b["db"], rate)
+        if a.get("ix") and b.get("ix"):
+            _db_point(p, "ix_", a["ix"], b["ix"], rate)
         ua, ub = a["units"], b["units"]
         with self.lock:
             self.series.append(p)
@@ -458,4 +475,5 @@ class PerfSampler(threading.Thread):
                     "step": self.step if span <= 3600 else 60 * every, "range": rng if rng in RANGES else "1h",
                     "span": span, "history_seconds": round(time.time() - oldest), "now": time.time(),
                     "db_kind": self.db_kind, "db_error": self.db_error,
+                    "index_mysql": self.index_mysql is not None, "ix_error": self.ix_error,
                     "psi": os.path.exists("/proc/pressure/cpu"), "series": series, "units": units}

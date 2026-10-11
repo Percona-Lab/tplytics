@@ -156,6 +156,9 @@ svg.bars .gl { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-
       <div class="card tw" id="fails"></div>
       <h2>Capture and index</h2><div class="grid" id="g-capture"></div>
       <h2>SQL on the copy</h2><div class="grid" id="g-sql"></div>
+      <h2>Index MySQL · DBTrail's built-in MySQL that stores the change index</h2>
+      <div class="cols" id="ix-cols"><div class="card"><table class="kv" id="ix-settings"></table></div><div class="card"><table class="kv" id="ix-size"></table></div></div>
+      <div class="grid" id="g-ix"></div>
       <h2>Process</h2><div class="grid" id="g-proc"></div>
       <h2>Containers</h2><div class="card" id="units"></div>
     </div>
@@ -222,6 +225,24 @@ const SQL = [
     {f: ms("db_sql_open_s"), c: "var(--c2)", name: "open"}, {f: ms("db_sql_views_s"), c: "var(--c5)", name: "views"},
     {f: ms("db_sql_slot_wait_s"), c: "var(--c3)", name: "slot wait"}]},
 ];
+const MB = f => p => p[f] === undefined ? undefined : p[f] / 1048576;
+const PG = f => p => p[f] === undefined ? undefined : p[f] * 16384 / 1048576;     // 16 KB InnoDB pages -> MB
+const IX = [
+  {id: "ixrows", t: "Changes written / removed", unit: "rows/s", d: 0, s: [{f: "ix_rows_inserted", c: "var(--c1)", name: "inserted"},
+    {f: "ix_rows_deleted", c: "var(--c3)", name: "deleted"}, {f: "ix_rows_updated", c: "var(--c2)", name: "updated"}],
+   extra: p => `${fmt(p.ix_tps, 0)} commits/s`},
+  {id: "ixio", t: "InnoDB data", stack: 1, unit: "MB/s", d: 1, s: [{f: MB("ix_data_read"), c: "var(--c1)", name: "read"}, {f: MB("ix_data_written"), c: "var(--c3)", name: "written"}],
+   extra: p => `${fmt(p.ix_fsyncs, 0)} fsyncs/s`},
+  {id: "ixredo", t: "Redo log", unit: "MB/s", d: 2, s: [{f: MB("ix_redo_written"), c: "var(--c5)", name: "written"}], extra: p => `checkpoint age ${fmt(p.ix_checkpoint_age_mb, 0)} MB`},
+  {id: "ixbp", t: "Buffer pool", stack: 1, unit: "MB", d: 0, head: p => p.ix_bp_pages_total === undefined ? undefined : (p.ix_bp_pages_total - p.ix_bp_pages_free) * 16384 / 1048576,
+   max: n => (n.series || []).reduce((a, p) => Math.max(a, (p.ix_bp_pages_total || 0) * 16384 / 1048576), 0) || undefined,
+   s: [{f: p => p.ix_bp_pages_total === undefined ? undefined : (p.ix_bp_pages_total - p.ix_bp_pages_free - p.ix_bp_pages_dirty) * 16384 / 1048576, c: "var(--c1)", name: "clean"},
+       {f: PG("ix_bp_pages_dirty"), c: "var(--c2)", name: "dirty"}, {f: PG("ix_bp_pages_free"), c: "var(--c6)", name: "free"}]},
+  {id: "ixhit", t: "Buffer pool reads from disk", unit: "/s", d: 0, s: [{f: "ix_bp_disk_reads", c: "var(--c3)", name: "page reads/s"}],
+   extra: p => `hit ${fmt(p.ix_bp_hit, 2)}% · ${fmt(p.ix_pages_flushed, 0)} pages flushed/s`},
+  {id: "ixthr", t: "Threads · history list", d: 0, s: [{f: "ix_threads_running", c: "var(--c3)", name: "running"}, {f: "ix_threads_connected", c: "var(--c1)", name: "connected"}],
+   extra: p => `history list ${fmt(p.ix_history_list, 0)}`},
+];
 const PROC = [
   {id: "cpu", t: "DBTrail process CPU", unit: "%", d: 0, s: [{f: "db_proc_cpu", c: "var(--c1)", name: "% of one CPU"}]},
   {id: "rss", t: "DBTrail process memory", unit: "MB", d: 0, s: [{f: "db_rss_mb", c: "var(--c5)", name: "resident MB"}]},
@@ -247,6 +268,7 @@ function drawCard(m, pts, node) {
 document.getElementById("g-capture").innerHTML = CAPTURE.map(cardHtml).join("");
 document.getElementById("g-sql").innerHTML = SQL.map(cardHtml).join("");
 document.getElementById("g-proc").innerHTML = PROC.map(cardHtml).join("");
+document.getElementById("g-ix").innerHTML = IX.map(cardHtml).join("");
 
 function tile(k, bigHtml, sub, st) { return `<div class="tile ${st || ""}"><div class="k">${k}</div><div class="big">${bigHtml}</div><div class="sub">${sub || ""}</div></div>`; }
 function renderSummary() {
@@ -329,6 +351,29 @@ function resolvedHtml(j) {
     `${r.failed ? ` · <span style="color:var(--critical)">${fmt(r.failed)} not merged (queries read their changes as before)</span>` : ""}</span>`;
 }
 function rows(n) { return n >= 1e6 ? fmt(n / 1e6, n >= 1e7 ? 0 : 1) + " M" : n >= 1e3 ? fmt(n / 1e3, 0) + " K" : fmt(n); }
+function human(name, v) {
+  if (v === null || v === undefined) return "–";
+  if (/(_size|redo_log_capacity|packet)$/.test(name) && /^\d+$/.test(v)) return bytes(+v);
+  if (/io_capacity/.test(name) && /^\d+$/.test(v)) return fmt(+v) + " IOPS";
+  return v;
+}
+function renderIndexMySQL() {
+  const X = (D.info || {}).index_mysql, P = D.perf || {};
+  document.getElementById("ix-cols").hidden = !X;
+  if (!X) return;
+  let h = `<tr class="grp"><td colspan="2">MySQL ${esc(X.version || "")} · up ${dur(X.uptime)} · settings that shape the index</td></tr>`;
+  h += X.settings.map(s => {
+    const changed = s.default !== null && s.default !== undefined && s.value !== s.default;
+    return `<tr><td>${esc(s.name)}</td><td><b${changed ? ' style="color:var(--warning)"' : ""}>${esc(human(s.name, s.value))}</b>` +
+      (s.default === null || s.default === undefined ? "" : changed ? ` <span>MySQL 8.4 default ${esc(human(s.name, s.default))}</span>` : ` <span>default</span>`) + `</td></tr>`;
+  }).join("");
+  document.getElementById("ix-settings").innerHTML = h;
+  let z = `<tr class="grp"><td colspan="2">Size by schema</td></tr>` + X.schemas.map(s => row(esc(s.schema), bytes(s.bytes), `${fmt(s.rows)} rows (estimate) · ${fmt(s.tables)} tables`)).join("");
+  z += `<tr class="grp"><td colspan="2">Largest tables</td></tr>` + X.tables.map(s => row(esc(s.table), bytes(s.bytes), `${esc(s.schema)} · ${fmt(s.rows)} rows (estimate)`)).join("");
+  if (P.ix_error) z += `<tr><td></td><td><span style="color:var(--critical)">metrics: ${esc(P.ix_error)}</span></td></tr>`;
+  z += `<tr><td></td><td><span>Values in orange differ from MySQL's default. Read-only: SHOW and information_schema, through the container's address on the Docker network.</span></td></tr>`;
+  document.getElementById("ix-size").innerHTML = z;
+}
 function renderJobs() {
   const I = D.info || {}, srv = (I.servers || [])[0] || {};
   const jobs = ((I.jobs || {})[srv.id] || []).slice().sort((a, b) => (b.started || 0) - (a.started || 0));   // newest first by start
@@ -425,11 +470,13 @@ function render() {
     ` · updated ${new Date(D.now * 1000).toLocaleTimeString([], {hour12: false})}` +
     (P.history_seconds !== undefined && P.history_seconds < SPAN[RANGE] ? ` · collected for ${P.history_seconds >= 3600 ? (P.history_seconds / 3600).toFixed(1) + " h" : Math.round(P.history_seconds / 60) + " min"} so far` : "");
   document.querySelectorAll("#ranges button").forEach(b => b.classList.toggle("on", b.dataset.r === RANGE));
-  renderSummary(); renderSettings(); renderJobs(); renderFails();
+  renderSummary(); renderSettings(); renderJobs(); renderFails(); renderIndexMySQL();
   const pts = P.series || [], lagPts = (D.lag_series || []).map(p => ({t: p.t, lag: p.lag}));
   CAPTURE.forEach(m => drawCard(m, m.lag ? lagPts : pts, P));
   SQL.forEach(m => drawCard(m, pts, P));
   PROC.forEach(m => drawCard(m, pts, P));
+  document.getElementById("g-ix").hidden = !P.index_mysql;
+  if (P.index_mysql) IX.forEach(m => drawCard(m, pts, P));
   renderUnits();
 }
 let pollTimer = null;

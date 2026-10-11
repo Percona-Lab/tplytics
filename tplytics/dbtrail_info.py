@@ -7,6 +7,12 @@ listen on localhost only) and served on /api/dbtrail:
 * the settings that shape the copy: SQL memory, index retention, the copy
   schedule, capacity of the index;
 * capture status (stream position, freshness, continuity) per server;
+* DBTrail's own index MySQL (the index-mysql container): version, uptime,
+  the settings that matter for it next to MySQL's defaults, and its size
+  per schema and largest tables; its status counters are sampled by the
+  /api/perf collector into ix_* series. It is reached on the container's
+  address on the Docker network with the root password DBTrail keeps in its
+  secret volume, and only read (SHOW and information_schema);
 * the latest copy jobs (full reads and refreshes) with their duration and
   outcome, from DBTrail's own run history file, and the tables each one
   rewrote in full and why, from the container's log file (read directly,
@@ -153,8 +159,81 @@ class RewriteLog:
         return [e for e in self.events if e["t"] and start - 1 <= e["t"] <= end + 1]
 
 
+INDEX_SECRET = "/var/lib/docker/volumes/dbtrail_bintrail-index-secret/_data/index_password"
+# settings that shape the index MySQL, with MySQL 8.4's defaults
+INDEX_SETTINGS = [
+    ("innodb_buffer_pool_size", "134217728"), ("innodb_redo_log_capacity", "104857600"),
+    ("innodb_flush_log_at_trx_commit", "1"), ("innodb_flush_method", "O_DIRECT"), ("innodb_doublewrite", "ON"),
+    ("innodb_io_capacity", "10000"), ("innodb_io_capacity_max", "20000"), ("log_bin", "ON"),
+    ("sort_buffer_size", "262144"), ("max_allowed_packet", "67108864"), ("innodb_buffer_pool_instances", None),
+    ("innodb_adaptive_hash_index", "OFF"), ("innodb_change_buffering", "none"), ("max_connections", "151"),
+]
+
+
+class IndexMySQL:
+    """Read-only connection to DBTrail's index MySQL container; reconnects on demand."""
+
+    def __init__(self, secret_file=INDEX_SECRET, name_part="index-mysql"):
+        self.secret_file, self.name_part = secret_file, name_part
+        self.conn = None
+        self.lock = threading.Lock()
+
+    def address(self):
+        c = _container(self.name_part)
+        if not c:
+            raise RuntimeError("index MySQL container not running")
+        for net in (c.get("NetworkSettings") or {}).get("Networks", {}).values():
+            if net.get("IPAddress"):
+                return net["IPAddress"]
+        raise RuntimeError("index MySQL container has no network address")
+
+    def execute(self, sql):
+        import pymysql
+        with self.lock:
+            if self.conn is None:
+                with open(self.secret_file) as fh:
+                    pw = fh.read().strip()
+                self.conn = pymysql.connect(host=self.address(), port=3306, user="root", password=pw, autocommit=True,
+                                            connect_timeout=5, read_timeout=30)
+            with self.conn.cursor() as c:
+                c.execute(sql)
+                rows = c.fetchall()
+                cols = [d[0] for d in c.description] if c.description else []
+            return cols, rows
+
+    def reset(self):
+        with self.lock:
+            try:
+                if self.conn is not None:
+                    self.conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self.conn = None
+
+    def settings(self):
+        names = [n for n, _ in INDEX_SETTINGS]
+        _, rows = self.execute("SHOW GLOBAL VARIABLES WHERE Variable_name IN (%s)" % ", ".join("'%s'" % n for n in names + ["version", "datadir"]))
+        v = {str(r[0]): str(r[1]) for r in rows}
+        _, rows = self.execute("SHOW GLOBAL STATUS WHERE Variable_name IN ('Uptime', 'Innodb_buffer_pool_pages_total', "
+                               "'Innodb_buffer_pool_pages_data', 'Innodb_buffer_pool_pages_dirty', 'Innodb_page_size')")
+        st = {str(r[0]): float(r[1] or 0) for r in rows}
+        _, rows = self.execute("SELECT table_schema, SUM(data_length + index_length), SUM(table_rows), COUNT(*) "
+                               "FROM information_schema.tables WHERE table_schema NOT IN "
+                               "('mysql', 'sys', 'performance_schema', 'information_schema') GROUP BY table_schema ORDER BY 2 DESC")
+        schemas = [{"schema": r[0], "bytes": int(r[1] or 0), "rows": int(r[2] or 0), "tables": int(r[3])} for r in rows]
+        _, rows = self.execute("SELECT table_schema, table_name, data_length + index_length, table_rows "
+                               "FROM information_schema.tables WHERE table_schema NOT IN "
+                               "('mysql', 'sys', 'performance_schema', 'information_schema') ORDER BY 3 DESC LIMIT 6")
+        tables = [{"schema": r[0], "table": r[1], "bytes": int(r[2] or 0), "rows": int(r[3] or 0)} for r in rows]
+        return {"version": v.get("version"), "uptime": st.get("Uptime"),
+                "settings": [{"name": n, "value": v.get(n), "default": d} for n, d in INDEX_SETTINGS if n in v],
+                "buffer_pool": {k: st.get(k) for k in st if k.startswith("Innodb_")},
+                "schemas": schemas, "tables": tables}
+
+
 class DBTrailInfo:
-    def __init__(self, console_url, token_file=None, history_file=None):
+    def __init__(self, console_url, token_file=None, history_file=None, index_mysql=None):
+        self.index_mysql = index_mysql
         self.url = console_url.rstrip("/")
         self.token_file = token_file
         self.history_file = history_file
@@ -248,6 +327,12 @@ class DBTrailInfo:
             servers.append(row)
         doc["servers"] = servers
         part("jobs", lambda: self._jobs({s["id"] for s in servers}))
+        if self.index_mysql is not None:
+            try:
+                doc["index_mysql"] = self.index_mysql.settings()
+            except Exception as e:  # noqa: BLE001
+                doc["errors"]["index_mysql"] = str(e)[:300]
+                self.index_mysql.reset()
         if self.rewrites.error:
             doc["errors"]["log"] = self.rewrites.error
         # keep what the page shows: the version, not every capability and permission
