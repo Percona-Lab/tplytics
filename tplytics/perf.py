@@ -252,9 +252,17 @@ PROM_GAUGES = {"stream_lag": "bintrail_stream_availability_lag_seconds",
 PROM_PHASES = ("total", "slot_wait", "spawn", "open", "views", "view_build", "query", "decode", "lockdown")
 
 
-def prometheus_sample(url):
+def prometheus_sample(url, extra_urls=()):
+    """DBTrail's metrics from url, plus any extra endpoints (since 0.104 the router publishes the
+    SQL-on-the-copy metrics on its own port); a metric found in several is summed."""
     with urllib.request.urlopen(url, timeout=3) as r:
         text = r.read().decode("utf-8", "replace")
+    for extra in extra_urls:
+        try:
+            with urllib.request.urlopen(extra, timeout=3) as r:
+                text += "\n" + r.read().decode("utf-8", "replace")
+        except OSError:
+            pass                                   # the router is optional and may be restarting
     vals = collections.defaultdict(float)
     phase = collections.defaultdict(float)
     for line in text.splitlines():
@@ -310,7 +318,7 @@ def _db_point(p, pre, da, db, rate):
 
 # ================================================================== sampler
 class PerfSampler(threading.Thread):
-    def __init__(self, engine=None, prometheus_url=None, step=5.0, db_kind=None, index_mysql=None):
+    def __init__(self, engine=None, prometheus_url=None, step=5.0, db_kind=None, index_mysql=None, extra_prom=None):
         super().__init__(daemon=True, name="perf")
         self.engine, self.prom, self.step = engine, prometheus_url, step
         self.db_kind = db_kind or ("dbtrail" if prometheus_url else (engine.name if engine else None))
@@ -328,10 +336,12 @@ class PerfSampler(threading.Thread):
         self.db_error = None
         # DBTrail's own index MySQL (dbtrail_info.IndexMySQL), sampled like a MySQL node into ix_* fields
         self.index_mysql, self.ix_error = index_mysql, None
+        # callable returning more Prometheus endpoints to read with prometheus_url (DBTrail's router)
+        self.extra_prom = extra_prom
 
     def _db(self):
         if self.prom:
-            return prometheus_sample(self.prom)
+            return prometheus_sample(self.prom, self.extra_prom() if self.extra_prom else ())
         if self.engine is None or getattr(self.engine, "name", "") not in ("mysql", "mariadb"):
             return None
         if self.session is None:

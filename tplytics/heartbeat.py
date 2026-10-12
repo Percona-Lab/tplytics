@@ -301,7 +301,12 @@ def run_monitor(args, engine):
             if index_mysql is not None:
                 from .dbtrail_info import IndexMySQL
                 ix = IndexMySQL(args.dbtrail_index_secret)
-            perf = PerfSampler(None if args.prometheus_url else engine, prometheus_url=args.prometheus_url, index_mysql=ix)
+            extra = None
+            if args.dbtrail_console and args.prometheus_url:
+                from .dbtrail_info import router_metrics_urls
+                extra = router_metrics_urls
+            perf = PerfSampler(None if args.prometheus_url else engine, prometheus_url=args.prometheus_url, index_mysql=ix,
+                               extra_prom=extra)
             perf.start()
             log("serving detailed performance on http://%s:%d/api/perf" % (args.listen, args.http_port))
         info = None

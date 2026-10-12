@@ -85,6 +85,20 @@ def container_started(name_part="bintrail"):
     return c.get("Config", {}).get("Image"), _ts(c["State"].get("StartedAt", "")[:26] + "Z")
 
 
+def container_address(name_part):
+    c = _container(name_part)
+    for net in ((c or {}).get("NetworkSettings") or {}).get("Networks", {}).values():
+        if net.get("IPAddress"):
+            return net["IPAddress"]
+    return None
+
+
+def router_metrics_urls():
+    """The router's Prometheus endpoint (DBTrail 0.104+ serves the MySQL port and its SQL metrics there)."""
+    ip = container_address("router")
+    return ["http://%s:9091/metrics" % ip] if ip else []
+
+
 def short_reason(reason):
     """DBTrail's reason for rewriting a table in full, in a few words."""
     m = re.match(r"the changes beside the table \((\d+) MB\) passed (\d+) MB", reason)
@@ -179,13 +193,10 @@ class IndexMySQL:
         self.lock = threading.Lock()
 
     def address(self):
-        c = _container(self.name_part)
-        if not c:
-            raise RuntimeError("index MySQL container not running")
-        for net in (c.get("NetworkSettings") or {}).get("Networks", {}).values():
-            if net.get("IPAddress"):
-                return net["IPAddress"]
-        raise RuntimeError("index MySQL container has no network address")
+        ip = container_address(self.name_part)
+        if not ip:
+            raise RuntimeError("index MySQL container not running or without a network address")
+        return ip
 
     def execute(self, sql):
         import pymysql
@@ -250,20 +261,26 @@ class DBTrailInfo:
             return json.loads(r.read().decode("utf-8", "replace"))
 
     def _jobs(self, server_ids):
-        """Latest copy jobs per server from DBTrail's run history (newest first)."""
-        if not self.history_file:
-            return {}
-        with open(self.history_file) as fh:
-            doc = json.load(fh)
+        """Latest copy jobs per server (newest first): DBTrail's copy-jobs API (0.104+), else its run history file."""
+        runs_by = {}
+        for sid in server_ids:
+            try:
+                runs_by[sid] = list(reversed(self._get("/api/servers/%s/copy-jobs" % sid).get("jobs") or []))
+            except Exception:  # noqa: BLE001 - older DBTrail: no such route
+                runs_by = {}
+                break
+        if not runs_by and self.history_file:
+            with open(self.history_file) as fh:
+                runs_by = (json.load(fh).get("servers") or {})
         out = {}
-        for sid, runs in (doc.get("servers") or {}).items():
+        for sid, runs in runs_by.items():
             if server_ids and sid not in server_ids:
                 continue
             jobs = []
             for e in runs[-JOBS_KEPT:]:
                 start, end = _ts(e.get("started_at")), _ts(e.get("finished_at"))
                 err = e.get("error") or None
-                skip = e.get("skip_reason") or None
+                skip = e.get("skip_reason") or (e.get("outcome") == "skipped" and "skipped") or None
                 jobs.append({"kind": e.get("kind"), "started": start, "finished": end,
                              "seconds": round(end - start, 1) if start and end else None,
                              "outcome": "skipped" if skip else ("failed" if err else "ok"),
@@ -276,8 +293,13 @@ class DBTrailInfo:
             for j in jobs:
                 if j["outcome"] != "skipped" and j["started"] and j["finished"]:
                     j["rewrites"] = self.rewrites.within(j["started"], j["finished"])
-                    if j.get("snapshot") in self.rewrites.resolved:
-                        j["resolved"] = self.rewrites.resolved[j["snapshot"]]
+                    snap = j.get("snapshot")
+                    if snap is None:
+                        # copy-jobs carries no snapshot time: the snapshot is anchored within a few
+                        # seconds of the job's start
+                        snap = next((s for s in self.rewrites.resolved if j["started"] - 2 <= s <= j["finished"]), None)
+                    if snap in self.rewrites.resolved:
+                        j["resolved"] = self.rewrites.resolved[snap]
         return out
 
     def snapshot(self):
@@ -300,6 +322,15 @@ class DBTrailInfo:
         part("capacity", lambda: self._get("/api/capacity"))
         part("backup", lambda: self._get("/api/backup-settings"))
         part("status", lambda: self._get("/api/status"))
+        try:
+            r = self._get("/api/router")
+            if r.get("configured") and r.get("status"):
+                doc["router"] = r["status"]
+                fb = self._get("/api/flashback")             # the MySQL port's saved settings
+                doc["router"]["routing_on"] = bool(fb.get("routing_on"))
+                doc["router"]["port_enabled"] = bool(fb.get("enabled"))
+        except Exception:  # noqa: BLE001 - DBTrail before 0.104 has no router
+            pass
         servers = []
         try:
             listed = self._get("/api/servers")

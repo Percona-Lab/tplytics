@@ -94,6 +94,24 @@ class DBTrailInfoTests(unittest.TestCase):
 
 
 class PrometheusTests(unittest.TestCase):
+    def test_router_endpoint_merged(self):
+        main = "bintrail_stream_events_indexed_total 10\n"
+        router = ('bintrail_sql_statement_phase_seconds_sum{phase="total"} 6\n'
+                  'bintrail_sql_statement_phase_seconds_count{phase="total"} 3\nbintrail_sql_slot_waiting 1\n')
+        paths = []
+        try:
+            for text in (main, router):
+                with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+                    f.write(text)
+                paths.append(f.name)
+            s = perf.prometheus_sample(pathlib.Path(paths[0]).as_uri(), [pathlib.Path(paths[1]).as_uri(), "http://127.0.0.1:1/"])
+        finally:
+            for x in paths:
+                os.unlink(x)
+        self.assertEqual(s["c"]["events_indexed"], 10)
+        self.assertEqual(s["c"]["sqlph_total_count"], 3)      # from the router's endpoint
+        self.assertEqual(s["g"]["sql_waiting"], 1)
+
     def test_phases_and_process(self):
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
             f.write(METRICS)

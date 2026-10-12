@@ -306,10 +306,24 @@ function renderSettings() {
   h += grp("SQL on the copy");
   h += row("Memory per statement", esc(sq.memory || "–"), esc(`${sq.source ? "set at " + sq.source : ""}${sq.default ? " · default " + sq.default : ""}`));
   h += row("Unmerged changes", sq.max_unmerged_mb ? fmt(sq.max_unmerged_mb) + " MB" : "–", "per table before answering from an earlier copy");
-  h += row("Statements at once", fmt(sq.max_in_flight), sq.disk ? "spill up to " + esc(sq.disk) : "");
+  h += row(I.router ? "Statements at once, web interface" : "Statements at once", fmt(sq.max_in_flight),
+    (sq.disk ? "spill up to " + esc(sq.disk) : "") + (I.router ? " · the SQL card in DBTrail's web interface; the MySQL port is the router's, below" : ""));
   if (sq.no_own_ceiling !== undefined) h += row("Memory limit per statement", sq.no_own_ceiling ? "not enforced" : "enforced",
     sq.no_own_ceiling ? esc(sq.no_own_ceiling) : "each statement runs under its own memory limit");
   if (sq.warning) h += `<tr><td></td><td><span style="color:var(--warning)">${esc(sq.warning)}</span></td></tr>`;
+  const R = I.router;
+  if (R) {
+    const pool = R.pool || {}, srvs = Object.values(R.servers || {}), s0 = srvs[0] || {};
+    const sum = k => srvs.reduce((a, s) => a + (s[k] || 0), 0);
+    h += grp("MySQL port (router)");
+    h += row("Statements at once", `${fmt(pool.workers)} × ${fmt(pool.threads_each)} threads`, `up to ${esc(pool.memory_each || "?")} each · ${fmt(pool.running)} running, ${fmt(pool.waiting)} waiting now`);
+    h += row("Read routing", R.routing_on ? "on" : "off", R.routing_on
+      ? `heavy reads (plan cost ≥ ${fmt(R.cost_threshold)} or scans ≥ ${fmt(R.scan_rows)} rows) are answered from the copy, the rest by the source${R.read_only ? "; writes refused" : ""}`
+      : "the copy answers every statement on the port");
+    // the router counts read-routing decisions only: with routing off there are none to count
+    if (R.routing_on) h += row("Routing decisions", `${fmt(sum("copy"))} to the copy`, `${fmt(sum("mysql"))} forwarded to the source · ${fmt(sum("refused"))} refused · since ${when(Date.parse(R.counting_since) / 1000)}`);
+    if (s0.copy_snapshot) h += row("Copy it reads", when(Date.parse(s0.copy_snapshot) / 1000), `${dur(D.now - Date.parse(s0.copy_snapshot) / 1000)} old`);
+  }
   h += grp("Index");
   h += row("Change history kept", esc(ro.retain || "–"), esc(`partitions every ${ro.interval || "?"} · ${(I.status || {}).partitions || "?"} partitions now`));
   const cov = (I.status || {}).coverage || {};
@@ -322,7 +336,7 @@ function renderSettings() {
   if (ca.status) {
     const assumed = (ca.retention || {}).retain, kept = ro.retain;
     const mismatch = assumed && kept && assumed !== kept;
-    h += `<tr><td>Capacity check</td><td><span class="pill ${ca.status === "pass" ? "ok" : "failed"}">${esc(ca.status)}</span> <span>${esc((ca.reason || "").replace(/_/g, " "))}` +
+    h += `<tr><td>Capacity check</td><td><span class="pill ${ca.status === "pass" ? "ok" : ca.status === "warn" ? "skipped" : "failed"}">${esc(ca.status)}</span> <span>${esc((ca.reason || "").replace(/_/g, " "))}` +
       (ca.projected_bytes ? ` · projects ${bytes(ca.projected_bytes)} at ${esc(assumed || "?")} of history` : "") + `</span>` +
       (mismatch ? `<br><span style="color:var(--warning)">The check assumes ${esc(assumed)} of change history (${esc((ca.retention || {}).source || "")}), while the index keeps ${esc(kept)}${cov.earliest_event ? ` (it holds ${dur(cov.latest_event - cov.earliest_event)} now)` : ""}.</span>` : "") + `</td></tr>`;
   }
