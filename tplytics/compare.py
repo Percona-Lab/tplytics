@@ -13,7 +13,7 @@ Targets, and optionally the primary, are described in a TOML file:
     http_port = 8080
 
     [primary]                         # optional: transactions/s of the primary
-    label = "lab-hdb (primary)"
+    label = "db1 (primary)"
     engine = "mysql"
     defaults_file = "/etc/parmaham/mysql-monitor.cnf"
 
@@ -21,13 +21,13 @@ Targets, and optionally the primary, are described in a TOML file:
     label = "MySQL replica"
     engine = "mysql"
     defaults_file = "/etc/tplytics/replica.cnf"
-    status_url = "http://192.168.193.161:8091"   # heartbeat monitor with --system-stats
+    status_url = "http://10.0.0.2:8091"   # heartbeat monitor with --system-stats
 
     [[target]]
     label = "DBTrail"
     engine = "dbtrail"
     defaults_file = "/etc/tplytics/dbtrail.cnf"
-    status_url = "http://192.168.230.14:8091"
+    status_url = "http://10.0.0.3:8091"
 
 A target's connection keys are the command line's (host, port, socket, user,
 password, database, defaults_file, init_sql, schema). Without status_url the
