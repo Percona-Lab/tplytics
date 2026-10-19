@@ -43,7 +43,10 @@ def _history_range(session):
     try:
         lo, hi = _one(session, "SELECT MIN(id), MAX(id) FROM history")
     except Exception:  # noqa: BLE001 - no id column: plain HammerDB schema
-        r = _one(session, "SELECT MIN(h_date), MAX(h_date) FROM history")
+        try:
+            r = _one(session, "SELECT MIN(h_date), MAX(h_date) FROM history")
+        except Exception:  # noqa: BLE001 - a copy without history (Doris CDC cannot read an invisible key)
+            return None
         return (_to_dt(r[0]), _to_dt(r[1])) if r and r[0] is not None else None
     if lo is None:
         return None

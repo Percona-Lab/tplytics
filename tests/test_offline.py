@@ -36,6 +36,18 @@ class OfflineTests(unittest.TestCase):
         # numbered Q01..Q14 without gaps, so sequential order and the per-query history line up
         self.assertEqual([q.id for q in self.queries], ["Q%02d" % i for i in range(1, 15)])
 
+    def test_doris_engine(self):
+        from tplytics.engines import get_engine
+        e = get_engine("doris", types.SimpleNamespace(host=None, port=None, socket=None, user=None, password=None,
+                                                      database="tpcc", defaults_file=None, schema=None, init_sql=None))
+        self.assertEqual(e.dialects, ["doris", "mysql", "default"])
+        self.assertEqual(e.default_port, 9030)
+        self.assertEqual(e.timeout_statement(299.6), "SET query_timeout = 300")
+        self.assertEqual(get_engine("apache-doris", e.opts).name, "doris")
+        # Doris runs the MySQL text unless a query file has a [sql].doris variant
+        q4 = next(q for q in self.queries if q.id == "Q04")
+        self.assertIn("FROM_UNIXTIME", q4.sql_for(e))
+
     def test_render_all_engines(self):
         rng = random.Random(1)
         for state in (fake_state(1, 5), fake_state(40, 3600), fake_state(5000, 86400 * 30)):

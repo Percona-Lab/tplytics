@@ -40,6 +40,13 @@ body { margin: 0; background: var(--bg); color: var(--text-primary);
 header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.2rem; margin-bottom: 0.7rem; }
 header h1 { font-size: 1.6rem; margin: 0; font-weight: 750; }
 header .meta { color: var(--text-secondary); font-size: 0.95rem; flex: 1 1 30rem; }
+.pairsel { display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 650; color: var(--text-secondary); }
+.pairsel select { font: inherit; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 0.45rem; border: 1px solid var(--line);
+                  background: var(--surface-1); color: var(--text-primary); max-width: 16rem; }
+.pairsel select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pairsel #pa { border-color: var(--t0); } .pairsel #pb { border-color: var(--t1); }
+.pairsel button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 0.45rem; color: var(--text-secondary);
+                  padding: 0.15rem 0.5rem; cursor: pointer; }
 button { font: inherit; font-weight: 650; border: 1px solid var(--line); background: var(--surface-1);
          color: var(--text-primary); padding: 0.45rem 1.1rem; border-radius: 0.5rem; cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -243,6 +250,8 @@ table.t tr.qrow:hover td { background: var(--surface-2); }
   <header>
     <h1 id="title">tplytics compare</h1>
     <div class="meta" id="meta">connecting…</div>
+    <span class="pairsel" id="pairsel" hidden><label for="pa">Compare</label><select id="pa"></select>
+      <button id="pswap" type="button" title="Swap the two sides">⇄</button><label for="pb">vs</label><select id="pb"></select></span>
     <a class="perflink" href="dbtrail" title="DBTrail version, settings, copy jobs, metrics and failed queries">DBTrail →</a>
   <a class="perflink" href="performance" title="OS, database, services and containers on every node">Performance →</a>
     <span class="pill" id="pill">–</span>
@@ -400,8 +409,11 @@ function build() {
 
 function render() {
   if (built !== S.targets.length) build();
-  document.getElementById("title").textContent = S.title;
-  document.title = S.title;
+  // the heading names the pair on screen, then the configured title (e.g. the lab's name)
+  const pairName = S.targets.map(t => t.label).join(" vs ");
+  const heading = S.title && S.all_targets && S.all_targets.length > 2 ? `${pairName} · ${S.title}` : (S.title || pairName);
+  document.getElementById("title").textContent = heading;
+  document.title = heading;
   const meta = document.getElementById("meta");
   meta.textContent = `${S.database} · same query and parameters on every target, data window ${S.common_window} · ` +
     `${S.rounds} rounds · one round at most every ${S.interval}s · timeout ${S.timeout}s`;
@@ -758,6 +770,12 @@ async function loadQuery() {
   if (!r.ok) return;
   const first = !QD || QD.id !== qOpen;
   QD = await r.json();
+  const [a, b] = PAIR.filter(l => QD.targets.includes(l)).length === 2 ? PAIR : QD.targets.slice(0, 2);
+  QD.targets = [a, b].filter(Boolean);
+  QD.speedup = b ? {[b]: ((QD.pair_speedup || {})[a] || {})[b]} : {};
+  QD.executions = (QD.executions || []).filter(x => QD.targets.includes(x.target));
+  const texts = QD.targets.map(l => (QD.sql[l] || {}).text).filter(x => x !== null && x !== undefined);
+  QD.same_sql = new Set(texts).size <= 1;
   if (first) renderQueryBox(); else { renderQueryStats(); drawQueryChart(); }
 }
 function renderQueryBox() {
@@ -864,10 +882,68 @@ document.getElementById("qbox").addEventListener("click", ev => { if (roundsOpen
 document.getElementById("qmodal").addEventListener("click", ev => { if (ev.target.id === "qmodal") closeQuery(); });
 document.addEventListener("keydown", ev => { if (ev.key === "Escape" && (qOpen || roundsOpen)) closeQuery(); });
 
-async function poll() {
+/* ---------- which two targets the page compares (?a=&b=, remembered per browser) ---------- */
+let PAIR = (() => {
+  const q = new URLSearchParams(location.search);
+  if (q.get("a") || q.get("b")) return [q.get("a"), q.get("b")];
+  try { return JSON.parse(localStorage.getItem("tplytics-compare-pair")) || []; } catch (e) { return []; }
+})();
+function pairView(raw) {
+  // the server runs every query on every target and keeps every pairing; the page shows two of them
+  const labels = raw.targets.map(t => t.label);
+  let [a, b] = PAIR;
+  if (!labels.includes(a)) a = labels[0];
+  if (!labels.includes(b) || b === a) b = labels.find(l => l !== a) || null;
+  PAIR = [a, b];
+  const pick = [a, b].filter(Boolean).map(l => raw.targets.find(t => t.label === l));
+  const ps = raw.pair_speedup || {};
+  const entry = e => {
+    if (!e) return e;
+    const res = {};
+    pick.forEach(t => { res[t.label] = {...e.results[t.label]}; });
+    const ra = res[a], rb = b && res[b];
+    if (rb) {
+      delete rb.speedup;
+      if (ra && ra.status === "ok" && rb.status === "ok") rb.speedup = Math.max(ra.elapsed, 1e-4) / Math.max(rb.elapsed, 1e-4);
+    }
+    return {...e, results: res};
+  };
+  return {...raw, targets: pick, base: a,
+    speedup: b ? {[b]: (ps[a] || {})[b] || {}} : {},
+    per_query: raw.per_query.map(q => ({...q, speedup: b ? {[b]: ((q.pair_speedup || {})[a] || {})[b]} : {}})),
+    current: entry(raw.current), history: (raw.history || []).map(entry), all_targets: labels};
+}
+function renderPairSelect(labels) {
+  const el = document.getElementById("pairsel");
+  el.hidden = labels.length < 2;
+  ["pa", "pb"].forEach((id, k) => {
+    const s = document.getElementById(id), want = labels.join("|") + "#" + PAIR[k];
+    if (s.dataset.k === want) return;
+    s.innerHTML = labels.map(l => `<option${l === PAIR[k] ? " selected" : ""}>${esc(l)}</option>`).join("");
+    s.dataset.k = want;
+  });
+}
+function setPair(a, b) {
+  if (a === b) b = (S.all_targets || []).find(l => l !== a) || null;
+  PAIR = [a, b];
+  try { localStorage.setItem("tplytics-compare-pair", JSON.stringify(PAIR)); } catch (e) {}
+  const q = new URLSearchParams(location.search); q.set("a", a); if (b) q.set("b", b);
+  history.replaceState(null, "", "?" + q.toString());
+  built = 0; roundKey = null; shownSeqs = "";            // the columns belong to the old pair
+  if (QD) QD = null;
+  poll(true);
+}
+document.getElementById("pa").onchange = ev => setPair(ev.target.value, PAIR[1]);
+document.getElementById("pb").onchange = ev => setPair(PAIR[0], ev.target.value);
+document.getElementById("pswap").onclick = () => setPair(PAIR[1], PAIR[0]);
+
+let pollTimer = null;
+async function poll(once) {
+  clearTimeout(pollTimer);
   try {
     const r = await fetch("api/state");
-    S = await r.json();
+    S = pairView(await r.json());
+    renderPairSelect(S.all_targets);
     render();
     await loadPasses();
     drawLongTerm();
@@ -875,7 +951,7 @@ async function poll() {
   } catch (e) {
     document.getElementById("pill").textContent = "disconnected";
   }
-  setTimeout(poll, 1000);
+  pollTimer = setTimeout(poll, 1000);
 }
 document.getElementById("toggle").onclick = async () => {
   await fetch(S && S.running ? "api/pause" : "api/resume", {method: "POST"});

@@ -318,6 +318,27 @@ class DBTrailSession(MySQLSession):
             sock.shutdown(socket.SHUT_RDWR)
 
 
+# ================================================================ Doris
+class DorisEngine(MySQLEngine):
+    """Apache Doris through its MySQL-compatible frontend port (9030).
+
+    Doris parses MySQL syntax, so a query file needs a ``[sql].doris`` text
+    only where Doris differs. CONNECTION_ID() and KILL QUERY work; the
+    statement time limit is the session's query_timeout, in whole seconds.
+    Doris has no MySQL-style transaction or row counters to chart.
+    """
+    name = "doris"
+    dialects = ["doris", "mysql", "default"]
+    default_port = 9030
+    activity_sql = None
+    queries_sql = None
+    rows_sql = None
+    heartbeat_writable = False
+
+    def timeout_statement(self, seconds):
+        return "SET query_timeout = %d" % max(1, int(round(seconds)))
+
+
 # ============================================================ PostgreSQL
 class PostgreSQLEngine(Engine):
     name = "postgresql"
@@ -386,9 +407,11 @@ ENGINES = {
     "mariadb": MariaDBEngine,
     "postgresql": PostgreSQLEngine,
     "dbtrail": DBTrailEngine,
+    "doris": DorisEngine,
 }
 ALIASES = {"percona": "mysql", "ps": "mysql", "postgres": "postgresql", "pg": "postgresql",
-           "pgsql": "postgresql", "bintrail": "dbtrail"}
+           "pgsql": "postgresql", "bintrail": "dbtrail",
+           "apache-doris": "doris"}
 
 
 def get_engine(name, opts):

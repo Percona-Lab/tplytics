@@ -189,8 +189,19 @@ replica and the DBTrail copy of the same primary. Every round runs one query,
 with the same parameters, on all targets at the same time; the parameters are
 drawn from the data every target has (the overlap of their time ranges, read
 from every target at the start of each full round), so the statements and the
-data they read are the same. The page, sized to fill a
-16:9 screen from 1080p to 4K without scrolling, shows for each target:
+data they read are the same.
+
+With more than two targets (say a MySQL replica, DBTrail and Doris), every
+query still runs on all of them in parallel, and the page shows **two at a
+time**: pick them in the header ("Compare A vs B", ⇄ swaps the sides). The
+choice is kept in the URL (`/?a=MySQL replica&b=Doris`), so each screen can
+be bookmarked on its own pair, and remembered per browser. Speedups, the
+per-query table and the verdict are computed for the chosen pair from the
+rounds where both succeeded; the server keeps them for every pairing, so
+switching is instant and loses nothing.
+
+The page, sized to fill a 16:9 screen from 1080p to 4K without scrolling,
+shows for each of the two targets:
 
 * **replication lag**, from the [heartbeat](#heartbeat-replication-lag);
 * the **geometric mean** of every successful execution so far, and the counts
@@ -497,6 +508,38 @@ report. A broken connection is re-opened, and the run continues in all cases.
 * `--raw FILE` (serial and concurrent): CSV with one row per execution, giving
   the query, thread, start time, elapsed time, status, rows, error and
   parameters.
+
+## Apache Doris
+
+`--engine doris` connects to a Doris frontend's MySQL-compatible port (9030
+by default). Doris parses the MySQL text of every query as is; a query file
+can still add `[sql].doris` where Doris should get a text of its own. The
+time limit is set with `SET query_timeout`, and a statement past it is
+cancelled with `KILL QUERY` like on MySQL.
+
+To compare Doris with a MySQL replica of the same primary, Doris can keep a
+copy itself: a streaming job (Doris 4.1+) reads the primary's binlog after a
+full snapshot, creating the tables on first sync (every table needs a
+primary key):
+
+```sql
+CREATE DATABASE tpcc;
+USE tpcc;
+CREATE JOB tpcc_cdc ON STREAMING
+FROM MYSQL (
+    "jdbc_url" = "jdbc:mysql://<primary>:3306",
+    "driver_url" = "mysql-connector-j-8.4.0.jar",
+    "driver_class" = "com.mysql.cj.jdbc.Driver",
+    "user" = "<user with REPLICATION SLAVE, REPLICATION CLIENT, SELECT>",
+    "password" = "<password>",
+    "database" = "tpcc",
+    "offset" = "initial"
+)
+TO DATABASE tpcc ("table.create.properties.replication_num" = "1");
+```
+
+The heartbeat row replicates like any other, so `tplytics heartbeat monitor
+--engine doris` measures the end-to-end lag of that job.
 
 ## Query files and engine variants
 

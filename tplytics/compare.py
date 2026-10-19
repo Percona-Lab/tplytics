@@ -569,6 +569,11 @@ class CompareLoop(threading.Thread):
         self.base = base
         self.pairs = {t.label: PairStats() for t in targets[1:]}
         self.pairs_q = {q.id: {t.label: PairStats() for t in targets[1:]} for q in self.queries}
+        # every ordered pair, so the page can put any two targets side by side:
+        # all_pairs[a][b] is time(a) / time(b) over rounds where both succeeded
+        labels = [t.label for t in targets]
+        self.all_pairs = {a: {b: PairStats() for b in labels if b != a} for a in labels}
+        self.all_pairs_q = {q.id: {a: {b: PairStats() for b in labels if b != a} for a in labels} for q in self.queries}
         self.passes = PassLog(args.history_file, args.keep_hours, args.timeout, len(self.queries))
         exec_path = None
         if args.history_file:
@@ -678,6 +683,15 @@ class CompareLoop(threading.Thread):
             with self.lock:
                 self.rounds += 1
                 b = results[self.base]
+                for a_lbl, row in self.all_pairs.items():
+                    ra = results[a_lbl]
+                    if ra.get("status") != OK:
+                        continue
+                    for b_lbl, ps in row.items():
+                        rb = results[b_lbl]
+                        if rb.get("status") == OK:
+                            ps.add(ra["elapsed"], rb["elapsed"])
+                            self.all_pairs_q[q.id][a_lbl][b_lbl].add(ra["elapsed"], rb["elapsed"])
                 for lbl, ps in self.pairs.items():
                     o = results[lbl]
                     if b.get("status") == OK and o.get("status") == OK:
@@ -705,9 +719,10 @@ class CompareLoop(threading.Thread):
         with self.lock:
             stats = {lbl: s.as_dict() for lbl, s in self.per_query[q.id].items()}
             speedup = {lbl: p.ratio for lbl, p in self.pairs_q[q.id].items()}
+            pair_speedup = {a: {b: p.ratio for b, p in row.items()} for a, row in self.all_pairs_q[q.id].items()}
         return {"id": q.id, "name": q.name, "description": q.description, "complexity": q.complexity,
                 "tables": q.tables, "weight": q.weight, "params": q.params, "sql": sql,
-                "same_sql": len(set(texts)) <= 1, "stats": stats, "speedup": speedup,
+                "same_sql": len(set(texts)) <= 1, "stats": stats, "speedup": speedup, "pair_speedup": pair_speedup,
                 "executions": self.execlog.for_query(q.id), "keep_hours": self.execlog.keep / 3600,
                 "timeout": self.args.timeout, "targets": [t.label for t in self.targets], "now": time.time()}
 
@@ -726,12 +741,15 @@ class CompareLoop(threading.Thread):
                 row = {"id": q.id, "name": q.name, "complexity": q.complexity,
                        "stats": {lbl: s.as_dict() for lbl, s in self.per_query[q.id].items()},
                        "speedup": {lbl: p.ratio for lbl, p in self.pairs_q[q.id].items()},
+                       "pair_speedup": {a: {b: p.ratio for b, p in row.items()} for a, row in self.all_pairs_q[q.id].items()},
                        "supported": {t.label: q.supported(t.engine) for t in self.targets}}
                 per_q.append(row)
             return {"current": _copy_entry(self.current), "history": [_copy_entry(h) for h in self.history],
                     "next_start": self.next_start, "rounds": self.rounds,
                     "overall": {lbl: s.as_dict() for lbl, s in self.overall.items()},
                     "speedup": {lbl: {"ratio": p.ratio, "rounds": p.n} for lbl, p in self.pairs.items()},
+                    "pair_speedup": {a: {b: {"ratio": p.ratio, "rounds": p.n} for b, p in row.items()}
+                                     for a, row in self.all_pairs.items()},
                     "base": self.base, "per_query": per_q,
                     "passes_version": self.passes.version,
                     "pass_in_progress": self.passes.cur and self.passes.cur["rounds"],
@@ -847,13 +865,14 @@ def make_handler(loop, targets, local, primary, args, local_perf=None):
             self.wfile.write(data)
 
         def do_GET(self):  # noqa: N802
-            if self.path in ("/", "/index.html"):
+            page = self.path.split("?")[0]          # the pages take their options from the query string
+            if page in ("/", "/index.html"):
                 with open(PAGE, "rb") as fh:
                     self._send(200, fh.read(), "text/html; charset=utf-8")
-            elif self.path in ("/performance", "/performance/"):
+            elif page in ("/performance", "/performance/"):
                 with open(PERF_PAGE, "rb") as fh:
                     self._send(200, fh.read(), "text/html; charset=utf-8")
-            elif self.path in ("/dbtrail", "/dbtrail/"):
+            elif page in ("/dbtrail", "/dbtrail/"):
                 with open(DBTRAIL_PAGE, "rb") as fh:
                     self._send(200, fh.read(), "text/html; charset=utf-8")
             elif self.path.split("?")[0] == "/api/dbtrail":
